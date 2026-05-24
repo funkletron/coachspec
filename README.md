@@ -59,6 +59,21 @@ provider:
 uv run python -m coachspec.cli run coaches/spirituality/bible_deep_dive.yaml --mock-provider
 ```
 
+## Basic Functionality Smoke Test
+
+Run the developer smoke test to validate, inspect, compile, exercise a short
+mock-provider session, persist it locally, export transcript/events/metadata,
+and run the lightweight evaluator:
+
+```powershell
+uv run python scripts/smoke_test.py
+```
+
+The smoke test uses `coaches/spirituality/bible_deep_dive.yaml`, the local
+deterministic mock provider, and temporary filesystem artifacts. It does not
+make real LLM calls, network calls, provider SDK calls, database calls, or UI
+calls.
+
 CoachSpec Eval v0 provides deterministic static checks for schema completeness,
 purpose clarity, identity clarity, pedagogy specificity, constraints, outputs,
 and memory behavior. It does not call LLM APIs or external scoring services.
