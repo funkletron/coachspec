@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import sys
 import webbrowser
 from http import HTTPStatus
@@ -14,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from coachspec.adapters import MockProviderAdapter
+from coachspec.adapters import BaseProviderAdapter, MockProviderAdapter, OpenAIProviderAdapter
+from coachspec.adapters.openai import OpenAIProviderConfigurationError
 from coachspec.persistence import JsonSessionStorage, SessionExporter, SessionPersistenceError
 from coachspec.runtime import CoachSession
 from coachspec.schema import CoachSpec, load_coachspec
@@ -23,6 +26,8 @@ from coachspec.schema import CoachSpec, load_coachspec
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent / ".local"
+DEFAULT_PROVIDER = "mock"
+SUPPORTED_PROVIDERS = ("mock", "openai")
 
 
 class WebDemo:
@@ -38,6 +43,34 @@ class WebDemo:
         self.exports_dir = exports_dir
         self.storage = JsonSessionStorage()
         self.sessions: dict[str, CoachSession] = {}
+        self.session_providers: dict[str, str] = {}
+
+    def config(self) -> dict[str, object]:
+        openai_has_key = bool(os.environ.get("OPENAI_API_KEY"))
+        openai_has_dependency = importlib.util.find_spec("openai") is not None
+        openai_available = openai_has_key and openai_has_dependency
+        if openai_available:
+            openai_message = "OpenAI provider is available."
+        elif not openai_has_key:
+            openai_message = "OPENAI_API_KEY is not set in the backend environment."
+        else:
+            openai_message = "OpenAI package is not installed. Run `uv sync --extra openai`."
+
+        return {
+            "default_provider": DEFAULT_PROVIDER,
+            "providers": {
+                "mock": {
+                    "available": True,
+                    "message": "Local deterministic mock provider.",
+                },
+                "openai": {
+                    "available": openai_available,
+                    "configured": openai_has_key,
+                    "dependency_installed": openai_has_dependency,
+                    "message": openai_message,
+                },
+            },
+        }
 
     def list_coaches(self) -> list[dict[str, object]]:
         coaches: list[dict[str, object]] = []
@@ -46,13 +79,15 @@ class WebDemo:
             coaches.append(self._coach_payload(spec, path))
         return coaches
 
-    def start_session(self, coach_id: str) -> dict[str, object]:
+    def start_session(self, coach_id: str, provider: str = DEFAULT_PROVIDER) -> dict[str, object]:
         spec, path = self._load_coach_by_id(coach_id)
+        provider_adapter = self._build_provider_adapter(provider)
         session = CoachSession.from_spec(
             spec,
-            provider_adapter=MockProviderAdapter(),
+            provider_adapter=provider_adapter,
         )
         self.sessions[session.state.session_id] = session
+        self.session_providers[session.state.session_id] = provider_adapter.provider_name
         session_path = self._persist_session(session)
         return self._session_payload(session, coach_path=path, session_path=session_path)
 
@@ -64,11 +99,28 @@ class WebDemo:
         if not message.strip():
             raise DemoError(HTTPStatus.BAD_REQUEST, "Message cannot be empty.")
         session = self._get_session(session_id)
-        response = session.respond_stub(message.strip())
+        response = session.respond(message.strip())
         session_path = self._persist_session(session)
         payload = self._session_payload(session, session_path=session_path)
         payload["response"] = response
         return payload
+
+    def _build_provider_adapter(self, provider: str) -> BaseProviderAdapter:
+        normalized_provider = (provider or DEFAULT_PROVIDER).strip().lower()
+        if normalized_provider == "mock":
+            return MockProviderAdapter()
+
+        if normalized_provider == "openai":
+            try:
+                return OpenAIProviderAdapter()
+            except OpenAIProviderConfigurationError as exc:
+                raise DemoError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+
+        supported = ", ".join(SUPPORTED_PROVIDERS)
+        raise DemoError(
+            HTTPStatus.BAD_REQUEST,
+            f"Unsupported provider: {provider}. Supported providers: {supported}.",
+        )
 
     def export_session(self, session_id: str) -> dict[str, object]:
         session = self._get_session(session_id)
@@ -101,6 +153,7 @@ class WebDemo:
             raise DemoError(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc)) from exc
         session.provider_adapter = MockProviderAdapter()
         self.sessions[session_id] = session
+        self.session_providers[session_id] = DEFAULT_PROVIDER
         return session
 
     def _persist_session(self, session: CoachSession) -> Path:
@@ -127,14 +180,23 @@ class WebDemo:
         session_path: Path | None = None,
     ) -> dict[str, object]:
         snapshot = session.memory.snapshot()
+        provider = self.session_providers.get(session.state.session_id, DEFAULT_PROVIDER)
+        events = [event.to_dict() for event in session.events()]
         return {
             "session_id": session.state.session_id,
+            "runtime": {
+                "session_id": session.state.session_id,
+                "provider": provider,
+                "event_count": len(events),
+                "started_at": session.state.created_at.isoformat(),
+            },
             "coach": self._coach_payload(
                 session.spec,
                 coach_path or self.root / "coaches" / f"{session.state.coach_id}.yaml",
             ),
             "status": {
                 "active": session.state.is_active,
+                "provider": provider,
                 "turn_count": session.state.turn_count,
                 "message_count": snapshot.message_count,
                 "memory_mode": session.spec.memory.mode,
@@ -149,6 +211,7 @@ class WebDemo:
                 }
                 for message in snapshot.messages
             ],
+            "events": events,
         }
 
 
@@ -166,6 +229,8 @@ def make_handler(demo: WebDemo) -> type[BaseHTTPRequestHandler]:
             try:
                 if parsed.path == "/":
                     self._send_html(INDEX_HTML)
+                elif parsed.path == "/api/config":
+                    self._send_json(demo.config())
                 elif parsed.path == "/api/coaches":
                     self._send_json({"coaches": demo.list_coaches()})
                 elif parsed.path == "/api/session":
@@ -181,7 +246,12 @@ def make_handler(demo: WebDemo) -> type[BaseHTTPRequestHandler]:
             try:
                 data = self._read_json()
                 if parsed.path == "/api/sessions":
-                    self._send_json(demo.start_session(str(data.get("coach_id", ""))))
+                    self._send_json(
+                        demo.start_session(
+                            str(data.get("coach_id", "")),
+                            str(data.get("provider", DEFAULT_PROVIDER)),
+                        )
+                    )
                 elif parsed.path == "/api/messages":
                     self._send_json(
                         demo.send_message(
@@ -256,6 +326,7 @@ INDEX_HTML = """<!doctype html>
     .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
     .stack { display: grid; gap: 12px; }
     .muted { color: #5d6b7a; }
+    .provider-note { font-size: 13px; line-height: 1.4; }
     .coach-summary { min-height: 96px; line-height: 1.45; }
     .status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; font-size: 14px; }
     .status div { background: #f3f6f9; border-radius: 6px; padding: 8px; overflow-wrap: anywhere; }
@@ -263,6 +334,11 @@ INDEX_HTML = """<!doctype html>
     .message { max-width: 82%; padding: 10px 12px; border-radius: 8px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
     .user { align-self: flex-end; background: #dcecff; }
     .assistant { align-self: flex-start; background: #edf2f7; }
+    details { border: 1px solid #e3e8ef; border-radius: 8px; background: #fbfcfe; }
+    summary { cursor: pointer; padding: 10px 12px; font-weight: 650; }
+    .events { max-height: 220px; overflow: auto; padding: 0 12px 12px; display: grid; gap: 8px; }
+    .event { background: white; border: 1px solid #e3e8ef; border-radius: 6px; padding: 8px; font-size: 13px; overflow-wrap: anywhere; }
+    .event pre { margin: 6px 0 0; white-space: pre-wrap; font: inherit; color: #425466; }
     form { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
     .export-path { font-size: 13px; overflow-wrap: anywhere; }
     @media (max-width: 820px) {
@@ -279,7 +355,7 @@ INDEX_HTML = """<!doctype html>
     <header>
       <div class="stack">
         <h1>CoachSpec Web Demo</h1>
-        <p class="muted">A local host application using CoachSpec runtime sessions and the mock provider.</p>
+        <p class="muted">A local host application using CoachSpec runtime sessions and provider adapters.</p>
       </div>
       <button id="export" class="secondary" disabled>Export Transcript</button>
     </header>
@@ -287,6 +363,14 @@ INDEX_HTML = """<!doctype html>
       <section class="stack">
         <h2>Available Coaches</h2>
         <select id="coaches"></select>
+        <label class="stack">
+          <span>Provider</span>
+          <select id="provider">
+            <option value="mock">Mock</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+        <p class="provider-note muted" id="providerStatus"></p>
         <button id="start">Start Session</button>
         <div class="coach-summary" id="summary"></div>
       </section>
@@ -294,6 +378,10 @@ INDEX_HTML = """<!doctype html>
         <h2 id="coachName">No coach selected</h2>
         <div class="status" id="status"></div>
         <div class="transcript" id="transcript"></div>
+        <details>
+          <summary id="eventsSummary">Runtime Events</summary>
+          <div class="events" id="events"></div>
+        </details>
         <form id="chat">
           <input id="message" autocomplete="off" placeholder="Send a message" disabled>
           <button id="send" disabled>Send</button>
@@ -304,6 +392,8 @@ INDEX_HTML = """<!doctype html>
   </main>
   <script>
     const coachesEl = document.querySelector("#coaches");
+    const providerEl = document.querySelector("#provider");
+    const providerStatusEl = document.querySelector("#providerStatus");
     const summaryEl = document.querySelector("#summary");
     const startEl = document.querySelector("#start");
     const chatEl = document.querySelector("#chat");
@@ -314,8 +404,11 @@ INDEX_HTML = """<!doctype html>
     const coachNameEl = document.querySelector("#coachName");
     const statusEl = document.querySelector("#status");
     const transcriptEl = document.querySelector("#transcript");
+    const eventsEl = document.querySelector("#events");
+    const eventsSummaryEl = document.querySelector("#eventsSummary");
     let coaches = [];
     let session = null;
+    let config = null;
 
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -341,9 +434,11 @@ INDEX_HTML = """<!doctype html>
       sendEl.disabled = false;
       exportEl.disabled = false;
       statusEl.innerHTML = `
-        <div>Session: ${payload.session_id}</div>
+        <div>Session: ${payload.runtime.session_id}</div>
+        <div>Provider: ${payload.runtime.provider}</div>
         <div>Turns: ${payload.status.turn_count}</div>
         <div>Messages: ${payload.status.message_count}</div>
+        <div>Events: ${payload.runtime.event_count}</div>
         <div>Memory: ${payload.status.memory_mode}</div>
         <div>Retention: ${payload.status.retention || "not specified"}</div>
         <div>Saved: ${payload.status.session_path}</div>
@@ -356,6 +451,27 @@ INDEX_HTML = """<!doctype html>
         transcriptEl.appendChild(item);
       }
       transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      eventsSummaryEl.textContent = `Runtime Events (${payload.runtime.event_count})`;
+      eventsEl.innerHTML = "";
+      for (const event of payload.events || []) {
+        const item = document.createElement("div");
+        const payloadPre = document.createElement("pre");
+        item.className = "event";
+        item.textContent = `#${event.sequence} ${event.event_type} at ${event.created_at}`;
+        payloadPre.textContent = JSON.stringify(event.payload, null, 2);
+        item.appendChild(payloadPre);
+        eventsEl.appendChild(item);
+      }
+    }
+
+    function renderProviderStatus() {
+      if (!config) return;
+      const openai = config.providers.openai;
+      providerEl.value = config.default_provider || "mock";
+      providerEl.querySelector('option[value="openai"]').disabled = !openai.available;
+      providerStatusEl.textContent = openai.available
+        ? "OpenAI is available for this backend process."
+        : `OpenAI unavailable: ${openai.message}`;
     }
 
     async function loadCoaches() {
@@ -366,13 +482,22 @@ INDEX_HTML = """<!doctype html>
       renderCoachSummary();
     }
 
+    async function loadConfig() {
+      config = await api("/api/config");
+      renderProviderStatus();
+    }
+
     coachesEl.addEventListener("change", renderCoachSummary);
     startEl.addEventListener("click", async () => {
       exportPathEl.textContent = "";
-      renderSession(await api("/api/sessions", {
-        method: "POST",
-        body: JSON.stringify({ coach_id: coachesEl.value })
-      }));
+      try {
+        renderSession(await api("/api/sessions", {
+          method: "POST",
+          body: JSON.stringify({ coach_id: coachesEl.value, provider: providerEl.value })
+        }));
+      } catch (error) {
+        exportPathEl.textContent = error.message;
+      }
     });
     chatEl.addEventListener("submit", async event => {
       event.preventDefault();
@@ -392,6 +517,7 @@ INDEX_HTML = """<!doctype html>
       });
       exportPathEl.textContent = `Exported transcript: ${payload.transcript_path}`;
     });
+    loadConfig();
     loadCoaches();
   </script>
 </body>
@@ -404,7 +530,7 @@ def run_server(host: str, port: int, open_browser: bool) -> None:
     server = ThreadingHTTPServer((host, port), make_handler(demo))
     url = f"http://{host}:{server.server_port}"
     print(f"CoachSpec web demo running at {url}")
-    print("Using local mock provider; press Ctrl+C to stop.")
+    print("Default provider is local mock. Select OpenAI in the UI when configured.")
     if open_browser:
         webbrowser.open(url)
     try:

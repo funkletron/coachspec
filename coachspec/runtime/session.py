@@ -165,7 +165,7 @@ class CoachSession:
             memory_snapshot=snapshot,
         )
 
-    def respond_stub(self, user_input: str) -> str:
+    def respond(self, user_input: str) -> str:
         self.append_user_message(user_input)
         if self.provider_adapter is not None:
             request = self.build_provider_request(user_input)
@@ -179,6 +179,9 @@ class CoachSession:
         )
         self.append_assistant_message(response)
         return response
+
+    def respond_stub(self, user_input: str) -> str:
+        return self.respond(user_input)
 
     def close(self) -> None:
         self.state.is_active = False
