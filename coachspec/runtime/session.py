@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 from coachspec.adapters import BaseProviderAdapter, ProviderRequest
 from coachspec.composition import CoachComposition, ExecutionStrategy
 from coachspec.compiler import CompiledPrompt, compile_prompt
-from coachspec.memory import BaseMemory, InMemoryConversationMemory, SessionMemorySnapshot
+from coachspec.memory import BaseMemory, InMemoryConversationMemory, SessionMemorySnapshot, utc_now
 from coachspec.schema import CoachSpec, load_coachspec
 
 
@@ -17,6 +18,9 @@ class SessionState:
     coach_id: str
     turn_count: int = 0
     is_active: bool = True
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    closed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,22 @@ class CoachSession:
             provider_adapter=provider_adapter,
         )
 
+    @classmethod
+    def from_persisted_state(
+        cls,
+        spec: CoachSpec,
+        state: SessionState,
+        memory_snapshot: SessionMemorySnapshot,
+        provider_adapter: BaseProviderAdapter | None = None,
+    ) -> CoachSession:
+        session = cls.from_spec(
+            spec,
+            memory=InMemoryConversationMemory.from_snapshot(memory_snapshot),
+            provider_adapter=provider_adapter,
+        )
+        session.state = state
+        return session
+
     def context(self) -> RuntimeContext:
         return RuntimeContext(
             coach_id=self.spec.coach.id,
@@ -83,9 +103,11 @@ class CoachSession:
     def append_user_message(self, content: str) -> None:
         self.memory.append("user", content)
         self.state.turn_count += 1
+        self.state.updated_at = utc_now()
 
     def append_assistant_message(self, content: str) -> None:
         self.memory.append("assistant", content)
+        self.state.updated_at = utc_now()
 
     def build_provider_request(self, user_input: str) -> ProviderRequest:
         return ProviderRequest(
@@ -115,3 +137,5 @@ class CoachSession:
 
     def close(self) -> None:
         self.state.is_active = False
+        self.state.updated_at = utc_now()
+        self.state.closed_at = self.state.updated_at

@@ -3,6 +3,7 @@ from coachspec.memory.base import (
     ConversationMessage,
     MessageRole,
     SessionMemorySnapshot,
+    utc_now,
 )
 from coachspec.memory.conversation import InMemoryConversationMemory
 
@@ -12,4 +13,5 @@ __all__ = [
     "InMemoryConversationMemory",
     "MessageRole",
     "SessionMemorySnapshot",
+    "utc_now",
 ]
