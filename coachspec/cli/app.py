@@ -8,12 +8,15 @@ from rich.console import Console
 from coachspec.adapters import MockProviderAdapter
 from coachspec.compiler import compile_prompt
 from coachspec.evaluation import evaluate_coachspec
+from coachspec.persistence import JsonSessionStorage, SessionPersistenceError
 from coachspec.runtime import CoachSession
 from coachspec.schema import validate_coachspec
 
 
 app = typer.Typer(help="Developer tools for CoachSpec files.")
 console = Console()
+DEFAULT_SESSION_PATH = Path("sessions") / "last_session.json"
+DEFAULT_SESSION_COACH_PATH = Path("coaches") / "spirituality" / "bible_deep_dive.yaml"
 
 
 @app.callback()
@@ -144,6 +147,75 @@ def run(
 
         response = session.respond_stub(user_input)
         console.print(f"CoachSpec: {response}")
+
+
+@app.command()
+def save_session(
+    coach_path: Path = typer.Option(
+        DEFAULT_SESSION_COACH_PATH,
+        "--coach",
+        "-c",
+        help="CoachSpec YAML file to initialize before saving.",
+    ),
+    output: Path = typer.Option(
+        DEFAULT_SESSION_PATH,
+        "--output",
+        "-o",
+        help="Local JSON session file to write.",
+    ),
+    message: str | None = typer.Option(
+        None,
+        "--message",
+        "-m",
+        help="Optional user message to record before saving.",
+    ),
+) -> None:
+    """Save a local runtime session as inspectable JSON."""
+    spec, errors = validate_coachspec(coach_path)
+
+    if errors:
+        console.print(f"[red]Invalid CoachSpec:[/red] {coach_path}")
+        for error in errors:
+            console.print(f"  - {error}")
+        raise typer.Exit(code=1)
+
+    if spec is None:
+        raise typer.Exit(code=1)
+
+    session = CoachSession.from_spec(spec)
+    if message:
+        session.respond_stub(message)
+
+    path = JsonSessionStorage().save(session, output)
+    console.print(f"[green]Saved session:[/green] {path}")
+    console.print(f"Session: {session.state.session_id}")
+    console.print(f"Coach: {session.spec.coach.name} ({session.spec.coach.id})")
+    console.print(f"Messages: {session.memory.snapshot().message_count}")
+
+
+@app.command()
+def load_session(
+    path: Path = typer.Option(
+        DEFAULT_SESSION_PATH,
+        "--path",
+        "-p",
+        help="Local JSON session file to load.",
+    ),
+) -> None:
+    """Load a persisted runtime session from local JSON."""
+    try:
+        session = JsonSessionStorage().load(path)
+    except SessionPersistenceError as exc:
+        console.print(f"[red]Invalid session file:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    context = session.context()
+    console.print(f"[bold]Loaded CoachSpec Session[/bold]: {context.coach_name} ({context.coach_id})")
+    console.print(f"Session: {context.session_id}")
+    console.print(f"Active: {session.state.is_active}")
+    console.print(f"Turns: {session.state.turn_count}")
+    console.print(f"Strategy: {context.execution_strategy.name}")
+    console.print(f"Messages: {context.memory_snapshot.message_count}")
 
 
 def main() -> None:

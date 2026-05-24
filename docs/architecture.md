@@ -144,6 +144,13 @@ conversation memory. The built-in `MockProviderAdapter` is deterministic and
 local; it does not call external APIs, read environment variables, or require
 provider SDK dependencies.
 
+Session persistence lives behind `coachspec.persistence`. The runtime owns live
+execution objects, while persistence records an explicit JSON snapshot of
+session metadata, runtime context, conversation history, selected behavioral
+modules, execution strategy, and timestamps. Loading a session reconstructs a
+fresh `CoachSession` from the saved snapshot rather than resuming hidden process
+state.
+
 ### 6. Memory Layer
 
 The memory layer defines how coaches declare, read, write, and constrain memory.
@@ -168,6 +175,11 @@ The first memory implementation provides a `BaseMemory` interface,
 `InMemoryConversationMemory`, and immutable `SessionMemorySnapshot` objects.
 This keeps session memory testable and replaceable without introducing
 databases, vector stores, or provider-specific retrieval.
+
+Local session persistence is separate from durable user memory. A persisted
+session captures the current runtime conversation for reload, inspection, and
+evaluation. It does not imply cross-session semantic memory, embedding-based
+retrieval, or long-term profile storage.
 
 ### 7. Evaluation Layer
 
@@ -348,6 +360,29 @@ Should not own:
 - Prompt compilation.
 - Provider-specific retrieval code.
 
+### `coachspec.persistence`
+
+Owns serialization and storage of runtime session snapshots.
+
+Recommended responsibilities:
+
+- `SessionSerializer`
+- `SessionStorage`
+- `JsonSessionStorage`
+- JSON-compatible session snapshots
+- corrupted session handling
+- local filesystem save and load behavior
+
+Should not own:
+
+- Model calls.
+- Provider adapter configuration.
+- Databases.
+- Vector stores.
+- Cloud sync.
+- Authentication.
+- Web UI behavior.
+
 ### `coachspec.cli`
 
 Owns developer-facing commands.
@@ -395,6 +430,8 @@ The key separations are:
   Anthropic, local models, LangChain, or any other provider.
 - Memory policy vs. memory storage: the spec declares allowed memory behavior;
   the host application supplies storage.
+- Runtime state vs. persisted state: the runtime keeps live process objects;
+  persistence stores explicit JSON snapshots that can be inspected and restored.
 - Pedagogy vs. prompting: pedagogy is a durable coaching method; prompts are a
   generated representation of that method.
 - Evaluation metadata vs. evaluator implementation: specs can declare what good
@@ -527,6 +564,30 @@ Expected behavior:
 - Allow simple clearing for test and session lifecycle use.
 - Remain independent of databases, vector stores, and embedding systems.
 
+### `SessionSerializer`
+
+Converts a live `CoachSession` into an explicit JSON-compatible snapshot and
+reconstructs a runtime session from that snapshot.
+
+Expected behavior:
+
+- Persist metadata, context, conversation history, composition, strategy, and
+  timestamps.
+- Keep serialized data human-readable.
+- Reject corrupted or unsupported session files clearly.
+- Avoid serializing provider adapters or host-specific process state.
+
+### `SessionStorage`
+
+Abstracts over session snapshot storage.
+
+Expected behavior:
+
+- Save and load `CoachSession` snapshots.
+- Keep filesystem JSON as the built-in implementation.
+- Allow future database, encrypted-file, or application-managed backends without
+  changing runtime session behavior.
+
 ### `Constraint`
 
 Represents a runtime-checkable rule.
@@ -597,6 +658,18 @@ Recommended boundary:
 - core defines `MemoryStore`.
 - built-in memory starts with simple in-memory and file-backed options only.
 - vector databases and hosted stores come later as integrations.
+
+### Treat Session Persistence as Local-First
+
+Session files are runtime artifacts that should remain portable and inspectable.
+
+Recommended boundary:
+
+- core persistence writes human-readable JSON.
+- saved sessions stay on the local filesystem.
+- provider adapters, credentials, and live clients are never serialized.
+- database, vector-store, and cloud-sync integrations can implement storage
+  interfaces later.
 
 ### Keep Evaluation Declarative First
 

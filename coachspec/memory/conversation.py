@@ -12,8 +12,12 @@ from coachspec.memory.base import (
 class InMemoryConversationMemory(BaseMemory):
     """Simple session-scoped conversation memory."""
 
-    def __init__(self) -> None:
-        self._messages: list[ConversationMessage] = []
+    def __init__(self, messages: tuple[ConversationMessage, ...] | None = None) -> None:
+        self._messages: list[ConversationMessage] = list(messages or ())
+
+    @classmethod
+    def from_snapshot(cls, snapshot: SessionMemorySnapshot) -> InMemoryConversationMemory:
+        return cls(messages=snapshot.messages)
 
     def append(self, role: MessageRole, content: str) -> ConversationMessage:
         message = ConversationMessage(role=role, content=content, created_at=utc_now())
