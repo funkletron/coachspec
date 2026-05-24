@@ -151,6 +151,13 @@ modules, execution strategy, and timestamps. Loading a session reconstructs a
 fresh `CoachSession` from the saved snapshot rather than resuming hidden process
 state.
 
+Runtime events are structured runtime artifacts. A `CoachSession` emits
+provider-neutral events for session start, user messages, assistant messages,
+memory reads, memory writes, and session end. These events support replay,
+debugging, evaluation, observability, transcript inspection, and future UI
+integration without introducing telemetry vendors, networking, async event
+buses, tracing frameworks, or orchestration behavior.
+
 ### 6. Memory Layer
 
 The memory layer defines how coaches declare, read, write, and constrain memory.
@@ -328,6 +335,8 @@ Recommended responsibilities:
 
 - `CoachRuntime`
 - `CoachSession`
+- `RuntimeEvent` models
+- local in-memory event collection
 - Message handling.
 - Runtime context handling.
 - Model adapter invocation.
@@ -369,7 +378,9 @@ Recommended responsibilities:
 - `SessionSerializer`
 - `SessionStorage`
 - `JsonSessionStorage`
+- `SessionExporter`
 - JSON-compatible session snapshots
+- transcript and event export artifacts
 - corrupted session handling
 - local filesystem save and load behavior
 
@@ -432,6 +443,9 @@ The key separations are:
   the host application supplies storage.
 - Runtime state vs. persisted state: the runtime keeps live process objects;
   persistence stores explicit JSON snapshots that can be inspected and restored.
+- Runtime events vs. analytics infrastructure: events are durable local runtime
+  artifacts for replay, debugging, inspection, and evaluation; they are not
+  telemetry pipelines.
 - Pedagogy vs. prompting: pedagogy is a durable coaching method; prompts are a
   generated representation of that method.
 - Evaluation metadata vs. evaluator implementation: specs can declare what good
@@ -613,6 +627,40 @@ The first implementation records user and assistant messages and returns stub
 assistant responses. Provider-backed response generation belongs behind a future
 adapter boundary.
 
+### `RuntimeEvent`
+
+Represents a structured event emitted by a runtime session.
+
+Expected behavior:
+
+- Be provider-neutral.
+- Be JSON-serializable.
+- Preserve deterministic ordering through a session-local sequence number.
+- Remain separate from CoachSpec YAML and schema state.
+- Support replay, debugging, evaluation, observability, transcript inspection,
+  and future UI integration.
+
+Current event types:
+
+- `SessionStarted`
+- `UserMessageReceived`
+- `AssistantMessageGenerated`
+- `MemoryRead`
+- `MemoryWritten`
+- `SessionEnded`
+
+### `SessionExporter`
+
+Exports local runtime artifacts from a persisted or live session.
+
+Expected behavior:
+
+- Write `transcript.json`.
+- Write `events.json`.
+- Write `metadata.json`.
+- Keep artifacts local, explicit, and human-inspectable.
+- Avoid provider-specific fields, networking, and telemetry integrations.
+
 ### `EvaluationResult`
 
 Represents assessment output for a transcript or session.
@@ -667,9 +715,23 @@ Recommended boundary:
 
 - core persistence writes human-readable JSON.
 - saved sessions stay on the local filesystem.
+- transcript exports write local JSON artifacts.
 - provider adapters, credentials, and live clients are never serialized.
 - database, vector-store, and cloud-sync integrations can implement storage
   interfaces later.
+
+### Keep Events Runtime-Local
+
+Runtime events should make session behavior inspectable without turning the
+runtime into an analytics or orchestration system.
+
+Recommended boundary:
+
+- events are emitted by runtime lifecycle methods.
+- events are collected in memory for the active session.
+- events may be serialized or exported as JSON artifacts.
+- events do not mutate CoachSpec YAML.
+- events do not call providers, networks, telemetry systems, or tracing systems.
 
 ### Keep Evaluation Declarative First
 

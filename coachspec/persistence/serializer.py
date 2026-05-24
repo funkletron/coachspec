@@ -11,6 +11,7 @@ from coachspec.persistence.models import (
     message_to_dict,
     parse_message,
 )
+from coachspec.runtime.events import event_from_dict
 from coachspec.runtime import CoachSession, SessionState
 from coachspec.schema import CoachSpec
 
@@ -81,6 +82,7 @@ class SessionSerializer:
             "behavioral_modules": list(serialized.behavioral_modules),
             "execution_strategy": serialized.execution_strategy,
             "timestamps": serialized.timestamps,
+            "events": [event.to_dict() for event in session.events()],
         }
 
     def from_dict(self, data: object) -> CoachSession:
@@ -98,6 +100,9 @@ class SessionSerializer:
         history = data.get("conversation_history")
         if not isinstance(history, list):
             raise SessionPersistenceError("conversation_history must be a list")
+        raw_events = data.get("events", [])
+        if not isinstance(raw_events, list):
+            raise SessionPersistenceError("events must be a list")
 
         try:
             spec = CoachSpec.model_validate(coach_spec_data)
@@ -136,7 +141,17 @@ class SessionSerializer:
             timestamps=timestamps,
         ).memory_snapshot()
 
-        return CoachSession.from_persisted_state(spec, state=state, memory_snapshot=snapshot)
+        try:
+            events = tuple(event_from_dict(event) for event in raw_events)
+        except (ValueError, TypeError) as exc:
+            raise SessionPersistenceError("events contain invalid runtime event data") from exc
+
+        return CoachSession.from_persisted_state(
+            spec,
+            state=state,
+            memory_snapshot=snapshot,
+            events=events,
+        )
 
     def _require_dict(self, data: dict[str, Any], key: str) -> dict[str, Any]:
         value = data.get(key)
