@@ -38,6 +38,10 @@ def test_compile_prompt_includes_core_sections() -> None:
     assert "Style: Socratic and structured" in prompt
     assert "# Pedagogy" in prompt
     assert "Approach: Guided close reading" in prompt
+    assert "# Coach Composition" in prompt
+    assert "Behavioral modules:" in prompt
+    assert "- socratic_questioning:" in prompt
+    assert "Execution strategy: Socratic Loop" in prompt
     assert "# Memory Behavior" in prompt
     assert "Mode: session" in prompt
     assert "# Constraints" in prompt
@@ -55,3 +59,4 @@ def test_cli_compile_prints_compiled_prompt() -> None:
     assert "# Coach Identity" in result.stdout
     assert "Bible Deep Dive Coach" in result.stdout
     assert "Guided close reading" in result.stdout
+    assert "Socratic Loop" in result.stdout

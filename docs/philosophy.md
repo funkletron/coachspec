@@ -29,6 +29,21 @@ log, test, or pass to a future provider adapter.
 This keeps CoachSpec provider-neutral. OpenAI, Anthropic, local models, or
 future runtimes should be integration choices, not schema requirements.
 
+## Composition Is Not Agents
+
+A coach can be understood as a composition of identity, pedagogy, reusable
+behavioral modules, and an execution strategy. That composition describes the
+shape of coaching behavior; it does not create multiple agents or an autonomous
+workflow.
+
+Behavioral modules answer what patterns the coach uses. Execution strategies
+answer how the coach tends to move through a conversation. Both remain
+declarative inputs to compilation and runtime context.
+
+This keeps CoachSpec focused on specification. It can name reusable coaching
+patterns without introducing orchestration, planners, tool routing, async
+systems, or provider-specific execution.
+
 ## Memory Is a Boundary
 
 Memory is part of coaching behavior, but storage is an implementation detail.

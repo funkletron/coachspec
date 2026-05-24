@@ -75,6 +75,7 @@ def run(path: Path) -> None:
     console.print(f"  Role: {spec.identity.role}")
     console.print(f"  Purpose: {spec.purpose.summary}")
     console.print(f"  Interaction: {spec.interaction.style}")
+    console.print(f"  Strategy: {context.execution_strategy.name}")
     console.print(f"  Memory: {spec.memory.mode}")
     console.print("Enter messages below. Type /exit to end the session.")
 
