@@ -16,7 +16,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from coachspec.adapters import BaseProviderAdapter, MockProviderAdapter, OpenAIProviderAdapter
+from coachspec.adapters import (
+    BaseProviderAdapter,
+    MockProviderAdapter,
+    OpenAIProviderAdapter,
+    ProviderConfigurationError,
+)
 from coachspec.adapters.openai import OpenAIProviderConfigurationError
 from coachspec.persistence import JsonSessionStorage, SessionExporter, SessionPersistenceError
 from coachspec.runtime import CoachSession
@@ -113,13 +118,19 @@ class WebDemo:
         if normalized_provider == "openai":
             try:
                 return OpenAIProviderAdapter()
-            except OpenAIProviderConfigurationError as exc:
-                raise DemoError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+            except ProviderConfigurationError as exc:
+                raise DemoError(HTTPStatus.BAD_REQUEST, exc.message, provider_error=exc) from exc
 
         supported = ", ".join(SUPPORTED_PROVIDERS)
+        error = ProviderConfigurationError(
+            code="unsupported_provider",
+            message=f"Unsupported provider: {provider}. Supported providers: {supported}.",
+            provider=normalized_provider or None,
+        )
         raise DemoError(
             HTTPStatus.BAD_REQUEST,
-            f"Unsupported provider: {provider}. Supported providers: {supported}.",
+            error.message,
+            provider_error=error,
         )
 
     def export_session(self, session_id: str) -> dict[str, object]:
@@ -216,10 +227,21 @@ class WebDemo:
 
 
 class DemoError(Exception):
-    def __init__(self, status: HTTPStatus, message: str) -> None:
+    def __init__(
+        self,
+        status: HTTPStatus,
+        message: str,
+        provider_error: ProviderConfigurationError | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.message = message
+        self.provider_error = provider_error
+
+    def to_payload(self) -> dict[str, object]:
+        if self.provider_error is not None:
+            return {"error": self.provider_error.to_dict()}
+        return {"error": self.message}
 
 
 def make_handler(demo: WebDemo) -> type[BaseHTTPRequestHandler]:
@@ -237,9 +259,9 @@ def make_handler(demo: WebDemo) -> type[BaseHTTPRequestHandler]:
                     session_id = parse_qs(parsed.query).get("id", [""])[0]
                     self._send_json(demo.get_session(session_id))
                 else:
-                    self._send_error(HTTPStatus.NOT_FOUND, "Not found.")
+                    self._send_error(DemoError(HTTPStatus.NOT_FOUND, "Not found."))
             except DemoError as exc:
-                self._send_error(exc.status, exc.message)
+                self._send_error(exc)
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
@@ -262,11 +284,11 @@ def make_handler(demo: WebDemo) -> type[BaseHTTPRequestHandler]:
                 elif parsed.path == "/api/export":
                     self._send_json(demo.export_session(str(data.get("session_id", ""))))
                 else:
-                    self._send_error(HTTPStatus.NOT_FOUND, "Not found.")
+                    self._send_error(DemoError(HTTPStatus.NOT_FOUND, "Not found."))
             except DemoError as exc:
-                self._send_error(exc.status, exc.message)
+                self._send_error(exc)
             except json.JSONDecodeError:
-                self._send_error(HTTPStatus.BAD_REQUEST, "Request body must be JSON.")
+                self._send_error(DemoError(HTTPStatus.BAD_REQUEST, "Request body must be JSON."))
 
         def log_message(self, format: str, *args: object) -> None:
             return
@@ -297,8 +319,8 @@ def make_handler(demo: WebDemo) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_error(self, status: HTTPStatus, message: str) -> None:
-            self._send_json({"error": message}, status=status)
+        def _send_error(self, error: DemoError) -> None:
+            self._send_json(error.to_payload(), status=error.status)
 
     return DemoHandler
 
@@ -416,7 +438,9 @@ INDEX_HTML = """<!doctype html>
         ...options
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Request failed");
+      const error = payload.error;
+      const message = error && typeof error === "object" ? error.message : error;
+      if (!response.ok) throw new Error(message || "Request failed");
       return payload;
     }
 

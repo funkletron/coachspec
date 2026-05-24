@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import http.client
 import importlib.util
+import json
+import threading
 from http import HTTPStatus
 from pathlib import Path
 
@@ -106,6 +109,13 @@ def test_web_demo_rejects_unsupported_provider(tmp_path: Path) -> None:
 
     assert exc_info.value.status == HTTPStatus.BAD_REQUEST
     assert "Unsupported provider" in exc_info.value.message
+    assert exc_info.value.provider_error is not None
+    assert exc_info.value.provider_error.to_dict() == {
+        "code": "unsupported_provider",
+        "message": "Unsupported provider: unsupported. Supported providers: mock, openai.",
+        "provider": "unsupported",
+        "recoverable": True,
+    }
 
 
 def test_web_demo_missing_openai_api_key_returns_configuration_error(
@@ -125,6 +135,9 @@ def test_web_demo_missing_openai_api_key_returns_configuration_error(
 
     assert exc_info.value.status == HTTPStatus.BAD_REQUEST
     assert "OPENAI_API_KEY" in exc_info.value.message
+    assert exc_info.value.provider_error is not None
+    assert exc_info.value.provider_error.code == "missing_api_key"
+    assert exc_info.value.provider_error.provider == "openai"
     assert demo.sessions == {}
 
 
@@ -138,7 +151,9 @@ def test_web_demo_openai_dependency_error_is_clear(
     class MissingDependencyAdapter:
         def __init__(self) -> None:
             raise module.OpenAIProviderConfigurationError(
-                "OpenAI provider requires the optional 'openai' package."
+                code="missing_optional_dependency",
+                message="OpenAI provider requires the optional 'openai' package.",
+                provider="openai",
             )
 
     monkeypatch.setattr(module, "OpenAIProviderAdapter", MissingDependencyAdapter)
@@ -153,7 +168,73 @@ def test_web_demo_openai_dependency_error_is_clear(
 
     assert exc_info.value.status == HTTPStatus.BAD_REQUEST
     assert "optional 'openai' package" in exc_info.value.message
+    assert exc_info.value.provider_error is not None
+    assert exc_info.value.provider_error.code == "missing_optional_dependency"
     assert demo.sessions == {}
+
+
+def test_web_demo_provider_error_http_response_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_demo_module()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    demo = module.WebDemo(
+        root=ROOT,
+        sessions_dir=tmp_path / "sessions",
+        exports_dir=tmp_path / "exports",
+    )
+
+    status, payload = post_json(
+        module,
+        demo,
+        "/api/sessions",
+        {"coach_id": "bible-deep-dive", "provider": "openai"},
+    )
+
+    assert status == HTTPStatus.BAD_REQUEST
+    assert payload["error"] == {
+        "code": "missing_api_key",
+        "message": "OpenAI provider requires OPENAI_API_KEY to be set in the environment.",
+        "provider": "openai",
+        "recoverable": True,
+    }
+
+
+def test_web_demo_provider_error_http_response_does_not_expose_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_demo_module()
+    secret = "test-secret-key"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+
+    class FailingAdapter:
+        def __init__(self) -> None:
+            raise module.ProviderConfigurationError(
+                code="provider_initialization_failed",
+                message="OpenAI provider could not be initialized.",
+                provider="openai",
+            )
+
+    monkeypatch.setattr(module, "OpenAIProviderAdapter", FailingAdapter)
+    demo = module.WebDemo(
+        root=ROOT,
+        sessions_dir=tmp_path / "sessions",
+        exports_dir=tmp_path / "exports",
+    )
+
+    status, payload = post_json(
+        module,
+        demo,
+        "/api/sessions",
+        {"coach_id": "bible-deep-dive", "provider": "openai"},
+    )
+
+    assert status == HTTPStatus.BAD_REQUEST
+    assert payload["error"]["code"] == "provider_initialization_failed"
+    assert payload["error"]["message"] == "OpenAI provider could not be initialized."
+    assert secret not in json.dumps(payload)
 
 
 def test_web_demo_config_reports_provider_status_without_secrets(
@@ -229,3 +310,30 @@ def test_web_demo_openai_path_can_use_fake_adapter(
     assert reply["runtime"]["provider"] == "openai"
     assert reply["response"] == "Fake OpenAI response for Bible Deep Dive Coach."
     assert [message["role"] for message in reply["transcript"]] == ["user", "assistant"]
+
+
+def post_json(
+    module: object,
+    demo: object,
+    path: str,
+    payload: dict[str, object],
+) -> tuple[int, dict[str, object]]:
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.make_handler(demo))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+    try:
+        connection.request(
+            "POST",
+            path,
+            body=json.dumps(payload),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        data = json.loads(response.read().decode("utf-8"))
+        return response.status, data
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

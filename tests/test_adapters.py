@@ -7,7 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from coachspec.adapters import MockProviderAdapter, OpenAIProviderAdapter, ProviderRequest, ProviderResponse
+from coachspec.adapters import (
+    MockProviderAdapter,
+    OpenAIProviderAdapter,
+    ProviderConfigurationError,
+    ProviderRequest,
+    ProviderResponse,
+)
 from coachspec.adapters.openai import OpenAIProviderConfigurationError
 from coachspec.runtime import CoachSession
 
@@ -121,8 +127,70 @@ def test_openai_provider_maps_request_to_chat_completion() -> None:
 def test_openai_provider_requires_api_key_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(OpenAIProviderConfigurationError, match="OPENAI_API_KEY"):
+    with pytest.raises(OpenAIProviderConfigurationError, match="OPENAI_API_KEY") as exc_info:
         OpenAIProviderAdapter()
+
+    error = exc_info.value
+    assert isinstance(error, ProviderConfigurationError)
+    assert error.code == "missing_api_key"
+    assert error.provider == "openai"
+    assert error.recoverable is True
+    assert error.to_dict() == {
+        "code": "missing_api_key",
+        "message": "OpenAI provider requires OPENAI_API_KEY to be set in the environment.",
+        "provider": "openai",
+        "recoverable": True,
+    }
+
+
+def test_openai_provider_reports_missing_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    real_import = builtins.__import__
+
+    def reject_openai_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "openai" or name.startswith("openai."):
+            raise ImportError("openai is not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_openai_import)
+
+    with pytest.raises(OpenAIProviderConfigurationError) as exc_info:
+        OpenAIProviderAdapter()
+
+    error = exc_info.value
+    assert error.code == "missing_optional_dependency"
+    assert error.provider == "openai"
+    assert "optional 'openai' package" in error.message
+
+
+def test_openai_provider_reports_initialization_failure_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "test-secret-key"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    real_import = builtins.__import__
+
+    class FailingOpenAI:
+        def __init__(self, api_key: str) -> None:
+            raise ValueError(f"bad key {api_key}")
+
+    def fake_openai_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "openai":
+            return SimpleNamespace(OpenAI=FailingOpenAI)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_openai_import)
+
+    with pytest.raises(OpenAIProviderConfigurationError) as exc_info:
+        OpenAIProviderAdapter()
+
+    error = exc_info.value
+    assert error.code == "provider_initialization_failed"
+    assert error.provider == "openai"
+    assert secret not in error.message
+    assert secret not in str(error.to_dict())
 
 
 class FakeOpenAIClient:

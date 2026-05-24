@@ -4,9 +4,10 @@ import os
 from typing import Any
 
 from coachspec.adapters.base import BaseProviderAdapter, ProviderRequest, ProviderResponse
+from coachspec.adapters.errors import ProviderConfigurationError
 
 
-class OpenAIProviderConfigurationError(RuntimeError):
+class OpenAIProviderConfigurationError(ProviderConfigurationError):
     """Raised when the optional OpenAI provider adapter cannot be configured."""
 
 
@@ -46,18 +47,31 @@ class OpenAIProviderAdapter(BaseProviderAdapter):
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise OpenAIProviderConfigurationError(
-                "OpenAI provider requires OPENAI_API_KEY to be set in the environment."
+                code="missing_api_key",
+                message="OpenAI provider requires OPENAI_API_KEY to be set in the environment.",
+                provider=self.provider_name,
             )
 
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise OpenAIProviderConfigurationError(
-                "OpenAI provider requires the optional 'openai' package. "
-                "Install it with `uv sync --extra openai`."
+                code="missing_optional_dependency",
+                message=(
+                    "OpenAI provider requires the optional 'openai' package. "
+                    "Install it with `uv sync --extra openai`."
+                ),
+                provider=self.provider_name,
             ) from exc
 
-        return OpenAI(api_key=api_key)
+        try:
+            return OpenAI(api_key=api_key)
+        except Exception as exc:
+            raise OpenAIProviderConfigurationError(
+                code="provider_initialization_failed",
+                message="OpenAI provider could not be initialized.",
+                provider=self.provider_name,
+            ) from exc
 
     def _messages_from_request(self, request: ProviderRequest) -> list[dict[str, str]]:
         messages = [{"role": "system", "content": request.instructions}]
