@@ -79,6 +79,10 @@ The compiler should be provider-neutral. It may produce a prompt plan,
 instruction bundle, policy graph, or execution manifest, but it should not call a
 model. This keeps the specification portable and makes compilation testable.
 
+The first compiler implementation emits a deterministic text instruction
+document from a validated `CoachSpec`. This is intentionally a plain prompt
+artifact, not runtime execution and not a provider integration.
+
 ### 4. Runtime Layer
 
 The runtime layer executes a compiled coach in a conversation.
@@ -100,6 +104,11 @@ Primary module:
 The runtime should depend on compiled artifacts, not raw YAML. Its job is
 execution, not specification interpretation.
 
+The initial runtime implementation establishes `CoachSession`, `SessionState`,
+and `RuntimeContext`. It can load a validated coach, compile instructions,
+initialize session state, expose runtime context, and maintain conversation
+history through memory abstractions. It intentionally does not call an LLM.
+
 ### 5. Memory Layer
 
 The memory layer defines how coaches declare, read, write, and constrain memory.
@@ -119,6 +128,11 @@ Primary module:
 Memory should be policy-driven. A coach specification may declare what kinds of
 memory are allowed or useful, but the runtime and host application decide which
 memory backend is available.
+
+The first memory implementation provides a `BaseMemory` interface,
+`InMemoryConversationMemory`, and immutable `SessionMemorySnapshot` objects.
+This keeps session memory testable and replaceable without introducing
+databases, vector stores, or provider-specific retrieval.
 
 ### 6. Evaluation Layer
 
@@ -295,6 +309,11 @@ The key separations are:
 
 - Specification vs. runtime: the YAML defines intent and policy; the runtime
   executes a compiled contract.
+- Specification vs. session state: the spec remains static and reusable;
+  `SessionState` holds mutable per-conversation facts such as session id,
+  active status, and turn count.
+- Compiled instructions vs. execution context: compiled prompts are stable
+  artifacts; `RuntimeContext` adds the active session id and memory snapshot.
 - Coach behavior vs. model provider: a coach should not depend on OpenAI,
   Anthropic, local models, LangChain, or any other provider.
 - Memory policy vs. memory storage: the spec declares allowed memory behavior;
@@ -391,6 +410,17 @@ Expected behavior:
 - Support deletion or expiration.
 - Allow simple in-memory implementations for tests.
 
+### `BaseMemory`
+
+The current runtime-facing memory interface.
+
+Expected behavior:
+
+- Append normalized conversation messages.
+- Return immutable session snapshots.
+- Allow simple clearing for test and session lifecycle use.
+- Remain independent of databases, vector stores, and embedding systems.
+
 ### `Constraint`
 
 Represents a runtime-checkable rule.
@@ -411,6 +441,10 @@ Expected behavior:
 - Process user turns.
 - Coordinate runtime, model adapter, constraints, and memory.
 - Emit structured events.
+
+The first implementation records user and assistant messages and returns stub
+assistant responses. Provider-backed response generation belongs behind a future
+adapter boundary.
 
 ### `EvaluationResult`
 
@@ -511,6 +545,10 @@ Likely scaling pressure points:
 - Security: untrusted specs should not execute arbitrary code.
 - Observability: runtimes should emit structured events without coupling to any
   specific tracing platform.
+- Session lifecycle: future hosts will need explicit start, pause, resume, and
+  close semantics without mutating the original coach specification.
+- Runtime adapters: model providers, tool execution, and evaluators should plug
+  into the runtime without changing schema models or memory stores.
 - Governance: as an open standard, the project may eventually need a formal
   change process for schema evolution.
 
