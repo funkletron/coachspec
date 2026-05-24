@@ -87,3 +87,17 @@ def test_cli_run_accepts_input_and_exits() -> None:
     assert "No LLM provider is configured." in result.stdout
     assert "Strategy: Socratic Loop" in result.stdout
     assert "Runtime is initialized and memory recorded your message." in result.stdout
+
+
+def test_cli_run_can_use_mock_provider() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        ["run", str(EXAMPLE), "--mock-provider"],
+        input="Hello\n/exit\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Using local mock provider adapter." in result.stdout
+    assert "Mock provider response for Bible Deep Dive Coach" in result.stdout

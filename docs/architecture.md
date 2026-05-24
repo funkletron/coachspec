@@ -125,6 +125,7 @@ Responsibilities:
 Primary module:
 
 - `coachspec.runtime`
+- `coachspec.adapters`
 
 The runtime should depend on compiled artifacts, not raw YAML. Its job is
 execution, not specification interpretation.
@@ -134,7 +135,14 @@ and `RuntimeContext`. It can load a validated coach, compile instructions,
 initialize session state, expose runtime context, and maintain conversation
 history through memory abstractions. Runtime context also exposes the selected
 execution strategy for inspection by future adapters. It intentionally does not
-call an LLM.
+call an LLM unless a local adapter implementation is supplied.
+
+Provider adapter interfaces now live in `coachspec.adapters`. `CoachSession` can
+accept an optional `BaseProviderAdapter`, build a provider-neutral
+`ProviderRequest`, and record the resulting `ProviderResponse` content in
+conversation memory. The built-in `MockProviderAdapter` is deterministic and
+local; it does not call external APIs, read environment variables, or require
+provider SDK dependencies.
 
 ### 6. Memory Layer
 
@@ -489,6 +497,13 @@ Expected behavior:
 - Accept normalized runtime messages and instructions.
 - Return normalized assistant output.
 - Hide provider-specific request and response formats.
+
+Current implementation:
+
+- `BaseProviderAdapter`
+- `ProviderRequest`
+- `ProviderResponse`
+- `MockProviderAdapter`
 
 ### `MemoryStore`
 

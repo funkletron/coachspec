@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
+from coachspec.adapters import BaseProviderAdapter, ProviderRequest
 from coachspec.composition import CoachComposition, ExecutionStrategy
 from coachspec.compiler import CompiledPrompt, compile_prompt
 from coachspec.memory import BaseMemory, InMemoryConversationMemory, SessionMemorySnapshot
@@ -34,6 +35,7 @@ class CoachSession:
     composition: CoachComposition
     compiled_prompt: CompiledPrompt
     memory: BaseMemory = field(default_factory=InMemoryConversationMemory)
+    provider_adapter: BaseProviderAdapter | None = None
     state: SessionState = field(init=False)
 
     def __post_init__(self) -> None:
@@ -44,6 +46,7 @@ class CoachSession:
         cls,
         spec: CoachSpec,
         memory: BaseMemory | None = None,
+        provider_adapter: BaseProviderAdapter | None = None,
     ) -> CoachSession:
         composition = CoachComposition.from_spec(spec)
         return cls(
@@ -51,6 +54,7 @@ class CoachSession:
             composition=composition,
             compiled_prompt=compile_prompt(spec, composition=composition),
             memory=memory or InMemoryConversationMemory(),
+            provider_adapter=provider_adapter,
         )
 
     @classmethod
@@ -58,8 +62,13 @@ class CoachSession:
         cls,
         path: str | Path,
         memory: BaseMemory | None = None,
+        provider_adapter: BaseProviderAdapter | None = None,
     ) -> CoachSession:
-        return cls.from_spec(load_coachspec(path), memory=memory)
+        return cls.from_spec(
+            load_coachspec(path),
+            memory=memory,
+            provider_adapter=provider_adapter,
+        )
 
     def context(self) -> RuntimeContext:
         return RuntimeContext(
@@ -78,8 +87,25 @@ class CoachSession:
     def append_assistant_message(self, content: str) -> None:
         self.memory.append("assistant", content)
 
+    def build_provider_request(self, user_input: str) -> ProviderRequest:
+        return ProviderRequest(
+            coach_id=self.spec.coach.id,
+            coach_name=self.spec.coach.name,
+            session_id=self.state.session_id,
+            instructions=self.compiled_prompt.text,
+            user_input=user_input,
+            execution_strategy=self.composition.execution_strategy,
+            memory_snapshot=self.memory.snapshot(),
+        )
+
     def respond_stub(self, user_input: str) -> str:
         self.append_user_message(user_input)
+        if self.provider_adapter is not None:
+            request = self.build_provider_request(user_input)
+            provider_response = self.provider_adapter.generate(request)
+            self.append_assistant_message(provider_response.content)
+            return provider_response.content
+
         response = (
             "Runtime is initialized and memory recorded your message. "
             "No model provider is configured yet."

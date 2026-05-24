@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from coachspec.adapters import MockProviderAdapter
 from coachspec.compiler import compile_prompt
 from coachspec.evaluation import evaluate_coachspec
 from coachspec.runtime import CoachSession
@@ -90,7 +91,14 @@ def evaluate(path: Path) -> None:
 
 
 @app.command()
-def run(path: Path) -> None:
+def run(
+    path: Path,
+    mock_provider: bool = typer.Option(
+        False,
+        "--mock-provider",
+        help="Use the built-in local mock provider adapter.",
+    ),
+) -> None:
     """Start a local runtime session without model-provider calls."""
     spec, errors = validate_coachspec(path)
 
@@ -103,12 +111,16 @@ def run(path: Path) -> None:
     if spec is None:
         raise typer.Exit(code=1)
 
-    session = CoachSession.from_spec(spec)
+    provider_adapter = MockProviderAdapter() if mock_provider else None
+    session = CoachSession.from_spec(spec, provider_adapter=provider_adapter)
     context = session.context()
 
     console.print(f"[bold]CoachSpec Runtime[/bold]: {context.coach_name} ({context.coach_id})")
     console.print(f"Session: {context.session_id}")
-    console.print("Compiled instructions loaded. No LLM provider is configured.")
+    if mock_provider:
+        console.print("Compiled instructions loaded. Using local mock provider adapter.")
+    else:
+        console.print("Compiled instructions loaded. No LLM provider is configured.")
     console.print("Instruction summary:")
     console.print(f"  Role: {spec.identity.role}")
     console.print(f"  Purpose: {spec.purpose.summary}")
