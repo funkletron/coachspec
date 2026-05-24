@@ -50,6 +50,21 @@ def test_session_event_ordering_uses_monotonic_sequence() -> None:
     ]
 
 
+def test_runtime_events_are_json_serializable_and_ordered() -> None:
+    session = CoachSession.from_file(EXAMPLE)
+    session.respond_stub("Help me study Romans 8.")
+    session.close()
+
+    serialized = [event.to_dict() for event in session.events()]
+    encoded = json.dumps(serialized)
+    decoded = json.loads(encoded)
+
+    assert [event["sequence"] for event in decoded] == list(range(1, len(decoded) + 1))
+    assert all(isinstance(event["created_at"], str) for event in decoded)
+    assert decoded[0]["event_type"] == "session_started"
+    assert decoded[-1]["event_type"] == "session_ended"
+
+
 def test_session_serializer_round_trips_events() -> None:
     session = CoachSession.from_file(EXAMPLE)
     session.respond_stub("Help me study John 1.")
@@ -74,6 +89,10 @@ def test_session_export_writes_transcript_events_and_metadata(tmp_path: Path) ->
     events = json.loads(result.events_path.read_text(encoding="utf-8"))
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
 
+    assert result.directory == tmp_path / "export"
+    assert result.transcript_path.parent == result.directory
+    assert result.events_path.parent == result.directory
+    assert result.metadata_path.parent == result.directory
     assert [message["role"] for message in transcript] == ["user", "assistant"]
     assert transcript[0]["content"] == "Help me read Psalm 23."
     assert events[0]["event_type"] == "session_started"

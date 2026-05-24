@@ -55,6 +55,19 @@ def test_runtime_context_creation() -> None:
     assert context.memory_snapshot.message_count == 0
 
 
+def test_session_loop_uses_compiled_prompt_not_raw_spec_reinterpretation() -> None:
+    spec = load_coachspec(EXAMPLE)
+    session = CoachSession.from_spec(spec)
+    compiled_text = session.compiled_prompt.text
+
+    spec.purpose.summary = "MUTATED RAW SPEC SUMMARY"
+    session.append_user_message("How do I read this passage carefully?")
+    request = session.build_provider_request("How do I read this passage carefully?")
+
+    assert request.instructions == compiled_text
+    assert "MUTATED RAW SPEC SUMMARY" not in request.instructions
+
+
 def test_session_message_append_behavior() -> None:
     session = CoachSession.from_file(EXAMPLE)
 

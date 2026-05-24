@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import builtins
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +14,22 @@ from coachspec.runtime import CoachSession
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "coaches" / "spirituality" / "bible_deep_dive.yaml"
+
+
+def test_runtime_import_does_not_require_provider_sdks(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_import = builtins.__import__
+
+    def reject_openai_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "openai" or name.startswith("openai."):
+            raise AssertionError("runtime import attempted to import optional openai SDK")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_openai_import)
+
+    runtime_module = importlib.reload(importlib.import_module("coachspec.runtime"))
+    session = runtime_module.CoachSession.from_file(EXAMPLE)
+
+    assert session.respond_stub("Hello").startswith("Runtime is initialized")
 
 
 def test_mock_provider_response() -> None:
@@ -27,6 +45,20 @@ def test_mock_provider_response() -> None:
     assert "Mock provider response for Bible Deep Dive Coach" in response.content
     assert "Help me study Psalm 23." in response.content
     assert response.metadata["coach_id"] == "bible-deep-dive"
+
+
+def test_mock_provider_is_deterministic_for_same_request() -> None:
+    session = CoachSession.from_file(EXAMPLE)
+    session.append_user_message("Help me study Psalm 23.")
+    request = session.build_provider_request("Help me study Psalm 23.")
+    adapter = MockProviderAdapter(response_prefix="Local deterministic response")
+
+    first = adapter.generate(request)
+    second = adapter.generate(request)
+
+    assert first == second
+    assert first.provider == "mock"
+    assert first.metadata["turn_count"] == request.memory_snapshot.message_count
 
 
 def test_session_with_provider_adapter_records_mock_response() -> None:

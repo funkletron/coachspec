@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from coachspec.cli import app
 from coachspec.persistence import JsonSessionStorage, SessionPersistenceError, SessionSerializer
 from coachspec.runtime import CoachSession
+from coachspec.adapters import MockProviderAdapter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,20 @@ def test_session_serializer_records_runtime_state() -> None:
     ]
     assert payload["timestamps"]["created_at"]
     assert payload["timestamps"]["updated_at"]
+
+
+def test_session_persistence_does_not_serialize_live_provider_adapter() -> None:
+    session = CoachSession.from_file(EXAMPLE, provider_adapter=MockProviderAdapter())
+    session.respond_stub("Help me study John 1.")
+
+    payload = SessionSerializer().to_dict(session)
+    reloaded = SessionSerializer().from_dict(payload)
+
+    serialized_text = json.dumps(payload)
+    assert "provider_adapter" not in serialized_text
+    assert "MockProviderAdapter" not in serialized_text
+    assert reloaded.provider_adapter is None
+    assert reloaded.memory.snapshot().message_count == 2
 
 
 def test_session_reload_restores_state_and_history() -> None:
