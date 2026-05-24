@@ -79,6 +79,10 @@ The compiler should be provider-neutral. It may produce a prompt plan,
 instruction bundle, policy graph, or execution manifest, but it should not call a
 model. This keeps the specification portable and makes compilation testable.
 
+The first compiler implementation emits a deterministic text instruction
+document from a validated `CoachSpec`. This is intentionally a plain prompt
+artifact, not runtime execution and not a provider integration.
+
 ### 4. Runtime Layer
 
 The runtime layer executes a compiled coach in a conversation.

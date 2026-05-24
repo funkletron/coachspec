@@ -165,13 +165,21 @@ Validate a coach file with:
 coachspec validate coaches/spirituality/bible_deep_dive.yaml
 ```
 
+Compile a validated coach file into a deterministic instruction document with:
+
+```powershell
+python -m coachspec.cli compile coaches/spirituality/bible_deep_dive.yaml
+```
+
 The same behavior is available from Python:
 
 ```python
 from coachspec.schema import load_coachspec, validate_coachspec
+from coachspec.compiler import compile_prompt
 
 spec = load_coachspec("coaches/spirituality/bible_deep_dive.yaml")
 spec, errors = validate_coachspec("coaches/spirituality/bible_deep_dive.yaml")
+compiled = compile_prompt(spec)
 ```
 
 ## Current Boundaries
@@ -179,7 +187,6 @@ spec, errors = validate_coachspec("coaches/spirituality/bible_deep_dive.yaml")
 The schema does not include:
 
 - runtime execution
-- prompt rendering
 - model/provider integrations
 - web UI
 - memory storage backends
