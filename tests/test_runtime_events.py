@@ -107,3 +107,68 @@ def test_cli_export_session_uses_persisted_local_session(tmp_path: Path) -> None
     assert (output_dir / "transcript.json").exists()
     assert (output_dir / "events.json").exists()
     assert (output_dir / "metadata.json").exists()
+
+
+def test_cli_mock_provider_run_persists_exportable_turns_events_and_counts(tmp_path: Path) -> None:
+    runner = CliRunner()
+    sessions_dir = tmp_path / "sessions"
+
+    run_result = runner.invoke(
+        app,
+        [
+            "run",
+            str(EXAMPLE),
+            "--mock-provider",
+            "--sessions-dir",
+            str(sessions_dir),
+        ],
+        input="Help me study John 1.\n/exit\n",
+    )
+
+    assert run_result.exit_code == 0
+    session_files = list(sessions_dir.glob("*.json"))
+    assert len(session_files) == 1
+
+    persisted = JsonSessionStorage().load(session_files[0])
+    session_id = persisted.state.session_id
+    assert persisted.state.turn_count == 1
+    assert persisted.state.is_active is False
+    assert persisted.state.closed_at is not None
+    assert [message.role for message in persisted.memory.snapshot().messages] == [
+        "user",
+        "assistant",
+    ]
+    assert "Mock provider response for Bible Deep Dive Coach" in (
+        persisted.memory.snapshot().messages[1].content
+    )
+    assert "session_ended" in [event.event_type for event in persisted.events()]
+
+    output_dir = tmp_path / "exported"
+    export_result = runner.invoke(
+        app,
+        [
+            "export-session",
+            session_id,
+            "--sessions-dir",
+            str(sessions_dir),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert export_result.exit_code == 0
+
+    transcript = json.loads((output_dir / "transcript.json").read_text(encoding="utf-8"))
+    events = json.loads((output_dir / "events.json").read_text(encoding="utf-8"))
+    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+
+    assert [message["role"] for message in transcript] == ["user", "assistant"]
+    assert transcript[0]["content"] == "Help me study John 1."
+    assert any(event["event_type"] == "user_message_received" for event in events)
+    assert any(event["event_type"] == "assistant_message_generated" for event in events)
+    assert any(event["event_type"] == "session_ended" for event in events)
+    assert metadata["turn_count"] == 1
+    assert metadata["message_count"] == len(transcript) == 2
+    assert metadata["event_count"] == len(events)
+    assert metadata["is_active"] is False
+    assert metadata["closed_at"] is not None

@@ -177,6 +177,11 @@ def run(
         "--mock-provider",
         help="Use the built-in local mock provider adapter.",
     ),
+    sessions_dir: Path = typer.Option(
+        DEFAULT_SESSION_PATH.parent,
+        "--sessions-dir",
+        help="Directory where the local JSON session is persisted.",
+    ),
 ) -> None:
     """Start a local runtime session without model-provider calls."""
     spec, errors = validate_coachspec(path)
@@ -193,9 +198,11 @@ def run(
     provider_adapter = MockProviderAdapter() if mock_provider else None
     session = CoachSession.from_spec(spec, provider_adapter=provider_adapter)
     context = session.context()
+    session_path = _persist_runtime_session(session, sessions_dir)
 
     console.print(f"[bold]CoachSpec Runtime[/bold]: {context.coach_name} ({context.coach_id})")
     console.print(f"Session: {context.session_id}")
+    console.print(f"Session file: {session_path}")
     if mock_provider:
         console.print("Compiled instructions loaded. Using local mock provider adapter.")
     else:
@@ -214,14 +221,17 @@ def run(
         except (EOFError, KeyboardInterrupt):
             console.print("\nSession ended.")
             session.close()
+            _persist_runtime_session(session, sessions_dir)
             break
 
         if user_input.strip().lower() in {"/exit", "exit", "quit"}:
             session.close()
+            _persist_runtime_session(session, sessions_dir)
             console.print("Session ended.")
             break
 
         response = session.respond_stub(user_input)
+        _persist_runtime_session(session, sessions_dir)
         console.print(f"CoachSpec: {response}")
 
 
@@ -367,3 +377,7 @@ def _load_session_by_id(session_id: str, sessions_dir: Path) -> CoachSession:
             return session
 
     raise SessionPersistenceError(f"session not found: {session_id}")
+
+
+def _persist_runtime_session(session: CoachSession, sessions_dir: Path) -> Path:
+    return JsonSessionStorage().save(session, sessions_dir / f"{session.state.session_id}.json")
