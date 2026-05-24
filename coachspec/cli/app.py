@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from coachspec.adapters import MockProviderAdapter
+from coachspec.composition import CoachComposition
 from coachspec.compiler import compile_prompt
 from coachspec.evaluation import evaluate_coachspec
 from coachspec.persistence import JsonSessionStorage, SessionPersistenceError
@@ -54,6 +55,80 @@ def compile(path: Path) -> None:
 
     compiled = compile_prompt(spec)
     typer.echo(compiled.text, nl=False)
+
+
+@app.command()
+def inspect(path: Path) -> None:
+    """Display a structured summary of a CoachSpec YAML file."""
+    spec, errors = validate_coachspec(path)
+
+    if errors:
+        console.print(f"[red]Invalid CoachSpec:[/red] {path}")
+        for error in errors:
+            console.print(f"  - {error}")
+        raise typer.Exit(code=1)
+
+    if spec is None:
+        raise typer.Exit(code=1)
+
+    composition = CoachComposition.from_spec(spec)
+
+    console.print(f"[bold]CoachSpec Inspect[/bold]: {spec.coach.name} ({spec.coach.id})")
+    console.print(f"Version: {spec.coach.version}")
+    console.print(f"Domain: {_value(spec.coach.domain)}")
+    console.print(f"Description: {_value(spec.coach.description)}")
+    console.print(f"Tags: {_inline_list(spec.coach.tags)}")
+
+    console.print("\n[bold]Identity[/bold]")
+    console.print(f"Role: {spec.identity.role}")
+    console.print(f"Persona: {_value(spec.identity.persona)}")
+    _print_list("Principles", spec.identity.principles)
+    _print_list("Boundaries", spec.identity.boundaries)
+
+    console.print("\n[bold]Purpose[/bold]")
+    console.print(f"Summary: {spec.purpose.summary}")
+    _print_list("Goals", spec.purpose.goals)
+    _print_list("Non-goals", spec.purpose.non_goals)
+
+    console.print("\n[bold]Pedagogy[/bold]")
+    console.print(f"Approach: {spec.pedagogy.approach}")
+    _print_list("Methods", spec.pedagogy.methods)
+    _print_list("Scaffolding", spec.pedagogy.scaffolding)
+
+    console.print("\n[bold]Interaction[/bold]")
+    console.print(f"Style: {spec.interaction.style}")
+    console.print(f"Tone: {_value(spec.interaction.tone)}")
+    console.print(f"Asks questions: {_yes_no(spec.interaction.asks_questions)}")
+    console.print(f"Adapts to user: {_yes_no(spec.interaction.adapts_to_user)}")
+    _print_list("Turn guidelines", spec.interaction.turn_guidelines)
+
+    console.print("\n[bold]Memory[/bold]")
+    console.print(f"Mode: {spec.memory.mode}")
+    console.print(f"Retention: {_value(spec.memory.retention)}")
+    console.print(f"Consent required: {_yes_no(spec.memory.consent_required)}")
+    _print_list("Stores", spec.memory.stores)
+
+    console.print("\n[bold]Constraints[/bold]")
+    _print_list("Rules", spec.constraints.rules)
+    _print_list("Refusals", spec.constraints.refusals)
+    _print_list("Escalation", spec.constraints.escalation)
+
+    console.print("\n[bold]Evaluation[/bold]")
+    _print_list("Criteria", spec.evaluation.criteria)
+    _print_list("Success signals", spec.evaluation.success_signals)
+    _print_list("Failure modes", spec.evaluation.failure_modes)
+    if spec.evaluation.metadata:
+        console.print("Metadata:")
+        for key in sorted(spec.evaluation.metadata):
+            console.print(f"  - {key}: {spec.evaluation.metadata[key]}")
+    else:
+        console.print("Metadata: None declared.")
+
+    console.print("\n[bold]Composition[/bold]")
+    console.print(f"Execution strategy: {composition.execution_strategy.name}")
+    console.print(f"Strategy id: {composition.execution_strategy.id}")
+    console.print(f"Strategy summary: {composition.execution_strategy.summary}")
+    _print_list("Behavioral modules", list(composition.module_ids()))
 
 
 @app.command()
@@ -220,3 +295,24 @@ def load_session(
 
 def main() -> None:
     app()
+
+
+def _value(value: str | None) -> str:
+    return value if value else "Not specified."
+
+
+def _inline_list(items: list[str]) -> str:
+    return ", ".join(items) if items else "None declared."
+
+
+def _print_list(label: str, items: list[str]) -> None:
+    console.print(f"{label}:")
+    if not items:
+        console.print("  - None declared.")
+        return
+    for item in items:
+        console.print(f"  - {item}")
+
+
+def _yes_no(value: bool) -> str:
+    return "Yes" if value else "No"

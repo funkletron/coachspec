@@ -34,6 +34,12 @@ Compile an example:
 uv run python -m coachspec.cli compile coaches/spirituality/bible_deep_dive.yaml
 ```
 
+Inspect an example summary:
+
+```powershell
+uv run python -m coachspec.cli inspect coaches/spirituality/bible_deep_dive.yaml
+```
+
 Evaluate an example:
 
 ```powershell
