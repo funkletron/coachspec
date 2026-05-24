@@ -5,7 +5,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from coachspec.adapters import MockProviderAdapter
+from coachspec.adapters import BaseProviderAdapter, MockProviderAdapter, OpenAIProviderAdapter
+from coachspec.adapters.openai import OpenAIProviderConfigurationError
 from coachspec.composition import CoachComposition
 from coachspec.compiler import compile_prompt
 from coachspec.evaluation import evaluate_coachspec
@@ -177,13 +178,18 @@ def run(
         "--mock-provider",
         help="Use the built-in local mock provider adapter.",
     ),
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        help="Optional live provider adapter to use. Currently supported: openai.",
+    ),
     sessions_dir: Path = typer.Option(
         DEFAULT_SESSION_PATH.parent,
         "--sessions-dir",
         help="Directory where the local JSON session is persisted.",
     ),
 ) -> None:
-    """Start a local runtime session without model-provider calls."""
+    """Start a runtime session with an optional provider adapter."""
     spec, errors = validate_coachspec(path)
 
     if errors:
@@ -195,7 +201,7 @@ def run(
     if spec is None:
         raise typer.Exit(code=1)
 
-    provider_adapter = MockProviderAdapter() if mock_provider else None
+    provider_adapter = _build_provider_adapter(mock_provider=mock_provider, provider=provider)
     session = CoachSession.from_spec(spec, provider_adapter=provider_adapter)
     context = session.context()
     session_path = _persist_runtime_session(session, sessions_dir)
@@ -205,6 +211,8 @@ def run(
     console.print(f"Session file: {session_path}")
     if mock_provider:
         console.print("Compiled instructions loaded. Using local mock provider adapter.")
+    elif provider_adapter is not None:
+        console.print(f"Compiled instructions loaded. Using {provider_adapter.provider_name} provider adapter.")
     else:
         console.print("Compiled instructions loaded. No LLM provider is configured.")
     console.print("Instruction summary:")
@@ -381,3 +389,26 @@ def _load_session_by_id(session_id: str, sessions_dir: Path) -> CoachSession:
 
 def _persist_runtime_session(session: CoachSession, sessions_dir: Path) -> Path:
     return JsonSessionStorage().save(session, sessions_dir / f"{session.state.session_id}.json")
+
+
+def _build_provider_adapter(mock_provider: bool, provider: str | None) -> BaseProviderAdapter | None:
+    if mock_provider and provider is not None:
+        console.print("[red]Choose either --mock-provider or --provider, not both.[/red]")
+        raise typer.Exit(code=1)
+
+    if mock_provider:
+        return MockProviderAdapter()
+
+    if provider is None:
+        return None
+
+    normalized_provider = provider.strip().lower()
+    if normalized_provider == "openai":
+        try:
+            return OpenAIProviderAdapter()
+        except OpenAIProviderConfigurationError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+    console.print(f"[red]Unsupported provider:[/red] {provider}. Supported providers: openai.")
+    raise typer.Exit(code=1)

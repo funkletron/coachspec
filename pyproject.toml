@@ -11,6 +11,11 @@ dependencies = [
     "typer>=0.25.1",
 ]
 
+[project.optional-dependencies]
+openai = [
+    "openai>=1.0.0",
+]
+
 [project.scripts]
 coachspec = "coachspec.cli:main"
 

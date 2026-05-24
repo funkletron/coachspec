@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 from typer.testing import CliRunner
 
+from coachspec.adapters import ProviderResponse
 from coachspec.cli import app
 from coachspec.memory import InMemoryConversationMemory, SessionMemorySnapshot
 from coachspec.runtime import CoachSession, RuntimeContext, SessionState
@@ -101,6 +103,46 @@ def test_cli_run_can_use_mock_provider() -> None:
     assert result.exit_code == 0
     assert "Using local mock provider adapter." in result.stdout
     assert "Mock provider response for Bible Deep Dive Coach" in result.stdout
+
+
+def test_cli_run_can_use_openai_provider_adapter(monkeypatch) -> None:
+    runner = CliRunner()
+    cli_app_module = importlib.import_module("coachspec.cli.app")
+
+    class FakeOpenAIProviderAdapter:
+        provider_name = "openai"
+
+        def generate(self, request) -> ProviderResponse:
+            return ProviderResponse(
+                content=f"Live provider response for {request.coach_name}.",
+                provider=self.provider_name,
+            )
+
+    monkeypatch.setattr(cli_app_module, "OpenAIProviderAdapter", FakeOpenAIProviderAdapter)
+
+    result = runner.invoke(
+        app,
+        ["run", str(EXAMPLE), "--provider", "openai"],
+        input="Hello\n/exit\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Using openai provider adapter." in result.stdout
+    assert "Live provider response for Bible Deep Dive Coach." in result.stdout
+
+
+def test_cli_run_rejects_openai_provider_without_api_key(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = runner.invoke(
+        app,
+        ["run", str(EXAMPLE), "--provider", "openai"],
+        input="/exit\n",
+    )
+
+    assert result.exit_code == 1
+    assert "OPENAI_API_KEY" in result.stdout
 
 
 def test_cli_inspect_outputs_structured_summary() -> None:
