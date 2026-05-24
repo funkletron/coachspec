@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from coachspec.compiler import compile_prompt
+from coachspec.evaluation import evaluate_coachspec
 from coachspec.runtime import CoachSession
 from coachspec.schema import validate_coachspec
 
@@ -49,6 +50,43 @@ def compile(path: Path) -> None:
 
     compiled = compile_prompt(spec)
     typer.echo(compiled.text, nl=False)
+
+
+@app.command()
+def evaluate(path: Path) -> None:
+    """Evaluate a CoachSpec YAML file without model-provider calls."""
+    spec, errors = validate_coachspec(path)
+
+    if errors:
+        console.print(f"[red]Invalid CoachSpec:[/red] {path}")
+        for error in errors:
+            console.print(f"  - {error}")
+        raise typer.Exit(code=1)
+
+    if spec is None:
+        raise typer.Exit(code=1)
+
+    report = evaluate_coachspec(spec)
+
+    console.print(f"[bold]CoachSpec Evaluation[/bold]: {spec.coach.name} ({report.coach_id})")
+    console.print(f"Overall score: {report.overall_score:.2f}")
+    console.print("Criteria:")
+    for result in report.results:
+        console.print(f"  - {result.criterion.name}: {result.score:.2f}")
+
+    console.print("Strengths:")
+    if report.strengths:
+        for strength in report.strengths:
+            console.print(f"  - {strength}")
+    else:
+        console.print("  - None identified.")
+
+    console.print("Improvement suggestions:")
+    if report.suggestions:
+        for suggestion in report.suggestions:
+            console.print(f"  - {suggestion}")
+    else:
+        console.print("  - None.")
 
 
 @app.command()

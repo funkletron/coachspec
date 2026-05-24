@@ -33,3 +33,13 @@ Compile an example:
 ```powershell
 uv run python -m coachspec.cli compile coaches/spirituality/bible_deep_dive.yaml
 ```
+
+Evaluate an example:
+
+```powershell
+uv run python -m coachspec.cli evaluate coaches/spirituality/bible_deep_dive.yaml
+```
+
+CoachSpec Eval v0 provides deterministic static checks for schema completeness,
+purpose clarity, identity clarity, pedagogy specificity, constraints, outputs,
+and memory behavior. It does not call LLM APIs or external scoring services.
