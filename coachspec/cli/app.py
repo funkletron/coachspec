@@ -9,7 +9,7 @@ from coachspec.adapters import MockProviderAdapter
 from coachspec.composition import CoachComposition
 from coachspec.compiler import compile_prompt
 from coachspec.evaluation import evaluate_coachspec
-from coachspec.persistence import JsonSessionStorage, SessionPersistenceError
+from coachspec.persistence import JsonSessionStorage, SessionExporter, SessionPersistenceError
 from coachspec.runtime import CoachSession
 from coachspec.schema import validate_coachspec
 
@@ -18,6 +18,7 @@ app = typer.Typer(help="Developer tools for CoachSpec files.")
 console = Console()
 DEFAULT_SESSION_PATH = Path("sessions") / "last_session.json"
 DEFAULT_SESSION_COACH_PATH = Path("coaches") / "spirituality" / "bible_deep_dive.yaml"
+DEFAULT_EXPORT_DIR = Path("exports")
 
 
 @app.callback()
@@ -293,6 +294,36 @@ def load_session(
     console.print(f"Messages: {context.memory_snapshot.message_count}")
 
 
+@app.command()
+def export_session(
+    session_id: str,
+    sessions_dir: Path = typer.Option(
+        DEFAULT_SESSION_PATH.parent,
+        "--sessions-dir",
+        help="Directory containing local JSON session files.",
+    ),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Directory to write transcript.json, events.json, and metadata.json.",
+    ),
+) -> None:
+    """Export transcript, events, and metadata for a persisted local session."""
+    try:
+        session = _load_session_by_id(session_id, sessions_dir)
+    except SessionPersistenceError as exc:
+        console.print(f"[red]Could not export session:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    export_dir = output_dir or DEFAULT_EXPORT_DIR / session_id
+    result = SessionExporter().export(session, export_dir)
+    console.print(f"[green]Exported session:[/green] {session_id}")
+    console.print(f"Transcript: {result.transcript_path}")
+    console.print(f"Events: {result.events_path}")
+    console.print(f"Metadata: {result.metadata_path}")
+
+
 def main() -> None:
     app()
 
@@ -316,3 +347,23 @@ def _print_list(label: str, items: list[str]) -> None:
 
 def _yes_no(value: bool) -> str:
     return "Yes" if value else "No"
+
+
+def _load_session_by_id(session_id: str, sessions_dir: Path) -> CoachSession:
+    storage = JsonSessionStorage()
+    direct_path = sessions_dir / f"{session_id}.json"
+    candidates = [direct_path]
+    if sessions_dir.exists():
+        candidates.extend(path for path in sorted(sessions_dir.glob("*.json")) if path != direct_path)
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            session = storage.load(path)
+        except SessionPersistenceError:
+            continue
+        if session.state.session_id == session_id:
+            return session
+
+    raise SessionPersistenceError(f"session not found: {session_id}")

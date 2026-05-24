@@ -9,6 +9,16 @@ from coachspec.adapters import BaseProviderAdapter, ProviderRequest
 from coachspec.composition import CoachComposition, ExecutionStrategy
 from coachspec.compiler import CompiledPrompt, compile_prompt
 from coachspec.memory import BaseMemory, InMemoryConversationMemory, SessionMemorySnapshot, utc_now
+from coachspec.runtime.events import (
+    AssistantMessageGenerated,
+    InMemoryEventCollector,
+    MemoryRead,
+    MemoryWritten,
+    RuntimeEvent,
+    SessionEnded,
+    SessionStarted,
+    UserMessageReceived,
+)
 from coachspec.schema import CoachSpec, load_coachspec
 
 
@@ -40,10 +50,18 @@ class CoachSession:
     compiled_prompt: CompiledPrompt
     memory: BaseMemory = field(default_factory=InMemoryConversationMemory)
     provider_adapter: BaseProviderAdapter | None = None
+    event_collector: InMemoryEventCollector = field(default_factory=InMemoryEventCollector)
     state: SessionState = field(init=False)
 
     def __post_init__(self) -> None:
         self.state = SessionState(session_id=str(uuid4()), coach_id=self.spec.coach.id)
+        self._emit(
+            SessionStarted,
+            {
+                "coach_name": self.spec.coach.name,
+                "execution_strategy": self.composition.execution_strategy.id,
+            },
+        )
 
     @classmethod
     def from_spec(
@@ -51,6 +69,7 @@ class CoachSession:
         spec: CoachSpec,
         memory: BaseMemory | None = None,
         provider_adapter: BaseProviderAdapter | None = None,
+        event_collector: InMemoryEventCollector | None = None,
     ) -> CoachSession:
         composition = CoachComposition.from_spec(spec)
         return cls(
@@ -59,6 +78,7 @@ class CoachSession:
             compiled_prompt=compile_prompt(spec, composition=composition),
             memory=memory or InMemoryConversationMemory(),
             provider_adapter=provider_adapter,
+            event_collector=event_collector or InMemoryEventCollector(),
         )
 
     @classmethod
@@ -81,6 +101,7 @@ class CoachSession:
         state: SessionState,
         memory_snapshot: SessionMemorySnapshot,
         provider_adapter: BaseProviderAdapter | None = None,
+        events: tuple[RuntimeEvent, ...] | None = None,
     ) -> CoachSession:
         session = cls.from_spec(
             spec,
@@ -88,28 +109,52 @@ class CoachSession:
             provider_adapter=provider_adapter,
         )
         session.state = state
+        if events is not None:
+            session.event_collector = InMemoryEventCollector(events)
         return session
 
     def context(self) -> RuntimeContext:
+        snapshot = self.memory.snapshot()
+        self._emit(MemoryRead, {"message_count": snapshot.message_count, "source": "context"})
         return RuntimeContext(
             coach_id=self.spec.coach.id,
             coach_name=self.spec.coach.name,
             session_id=self.state.session_id,
             execution_strategy=self.composition.execution_strategy,
             compiled_prompt=self.compiled_prompt,
-            memory_snapshot=self.memory.snapshot(),
+            memory_snapshot=snapshot,
         )
 
     def append_user_message(self, content: str) -> None:
-        self.memory.append("user", content)
+        self._emit(UserMessageReceived, {"content": content})
+        message = self.memory.append("user", content)
         self.state.turn_count += 1
         self.state.updated_at = utc_now()
+        self._emit(
+            MemoryWritten,
+            {
+                "role": message.role,
+                "content": message.content,
+                "message_created_at": message.created_at.isoformat(),
+            },
+        )
 
     def append_assistant_message(self, content: str) -> None:
-        self.memory.append("assistant", content)
+        self._emit(AssistantMessageGenerated, {"content": content})
+        message = self.memory.append("assistant", content)
         self.state.updated_at = utc_now()
+        self._emit(
+            MemoryWritten,
+            {
+                "role": message.role,
+                "content": message.content,
+                "message_created_at": message.created_at.isoformat(),
+            },
+        )
 
     def build_provider_request(self, user_input: str) -> ProviderRequest:
+        snapshot = self.memory.snapshot()
+        self._emit(MemoryRead, {"message_count": snapshot.message_count, "source": "provider_request"})
         return ProviderRequest(
             coach_id=self.spec.coach.id,
             coach_name=self.spec.coach.name,
@@ -117,7 +162,7 @@ class CoachSession:
             instructions=self.compiled_prompt.text,
             user_input=user_input,
             execution_strategy=self.composition.execution_strategy,
-            memory_snapshot=self.memory.snapshot(),
+            memory_snapshot=snapshot,
         )
 
     def respond_stub(self, user_input: str) -> str:
@@ -139,3 +184,15 @@ class CoachSession:
         self.state.is_active = False
         self.state.updated_at = utc_now()
         self.state.closed_at = self.state.updated_at
+        self._emit(SessionEnded, {"closed_at": self.state.closed_at.isoformat()})
+
+    def events(self) -> tuple[RuntimeEvent, ...]:
+        return self.event_collector.snapshot()
+
+    def _emit(self, event_class: type[RuntimeEvent], payload: dict[str, object]) -> RuntimeEvent:
+        return self.event_collector.emit(
+            event_class,
+            session_id=self.state.session_id,
+            coach_id=self.state.coach_id,
+            payload=payload,
+        )

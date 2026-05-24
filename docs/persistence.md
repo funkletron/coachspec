@@ -19,6 +19,7 @@ The JSON session format stores:
 - selected behavioral modules
 - selected execution strategy
 - session timestamps for creation, last update, and close time
+- provider-neutral runtime events emitted during the session
 
 The format is explicit rather than compact. That is deliberate: persisted
 sessions are part of the developer-facing surface and should be easy to inspect.
@@ -62,6 +63,12 @@ Load the default local session:
 python -m coachspec.cli load-session
 ```
 
+Export transcript, events, and metadata for a saved session:
+
+```bash
+python -m coachspec.cli export-session <session-id>
+```
+
 Use explicit paths:
 
 ```bash
@@ -71,6 +78,10 @@ python -m coachspec.cli save-session \
   --message "Help me study Psalm 23."
 
 python -m coachspec.cli load-session --path sessions/bible-session.json
+
+python -m coachspec.cli export-session <session-id> \
+  --sessions-dir sessions \
+  --output-dir exports/bible-session
 ```
 
 The default output path is `sessions/last_session.json`. The `sessions/`
@@ -97,6 +108,20 @@ The persisted file owns a stable snapshot:
 Loading a session reconstructs a fresh `CoachSession` from the persisted
 snapshot. Provider adapters are not serialized because they may hold process
 state, credentials, sockets, SDK clients, or host-specific configuration.
+
+## Export Artifacts
+
+Session export writes three local JSON files:
+
+- `transcript.json`: ordered user and assistant messages
+- `events.json`: ordered runtime events with event type, sequence, timestamp,
+  session id, coach id, and payload
+- `metadata.json`: session id, coach id, coach name, turn count, timestamps,
+  message count, event count, and execution strategy
+
+These artifacts are intended for evaluation, replay, debugging, observability,
+transcript inspection, and future UI integration. They are not telemetry and do
+not imply network upload or analytics infrastructure.
 
 ## Corrupted Sessions
 
