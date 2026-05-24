@@ -49,6 +49,7 @@ def test_runtime_context_creation() -> None:
     assert context.coach_id == "bible-deep-dive"
     assert context.coach_name == "Bible Deep Dive Coach"
     assert context.session_id == session.state.session_id
+    assert context.execution_strategy.id == "socratic_loop"
     assert context.memory_snapshot.message_count == 0
 
 
@@ -84,4 +85,5 @@ def test_cli_run_accepts_input_and_exits() -> None:
     assert result.exit_code == 0
     assert "CoachSpec Runtime" in result.stdout
     assert "No LLM provider is configured." in result.stdout
+    assert "Strategy: Socratic Loop" in result.stdout
     assert "Runtime is initialized and memory recorded your message." in result.stdout

@@ -83,7 +83,32 @@ The first compiler implementation emits a deterministic text instruction
 document from a validated `CoachSpec`. This is intentionally a plain prompt
 artifact, not runtime execution and not a provider integration.
 
-### 4. Runtime Layer
+### 4. Composition Layer
+
+The composition layer describes how a coach is assembled from identity,
+pedagogy, behavioral modules, and an execution strategy.
+
+Responsibilities:
+
+- Represent `CoachComposition` as a declarative summary of coach behavior.
+- Define reusable behavioral module references.
+- Define execution strategies such as `sequential_guidance`, `socratic_loop`,
+  `reflective_cycle`, `curriculum_progression`, and `accountability_cycle`.
+- Keep composition provider-neutral and runtime-neutral.
+- Avoid multi-agent orchestration, workflow engines, async systems, or
+  planner/executor abstractions.
+
+Primary modules:
+
+- `coachspec.composition`
+- `coachspec.modules`
+
+Composition answers: "What cognitive structure should this coach follow?" It
+does not answer: "Which agent runs next?" The current implementation derives
+composition from existing schema fields and exposes it to the compiler and
+runtime without changing the YAML schema.
+
+### 5. Runtime Layer
 
 The runtime layer executes a compiled coach in a conversation.
 
@@ -107,9 +132,11 @@ execution, not specification interpretation.
 The initial runtime implementation establishes `CoachSession`, `SessionState`,
 and `RuntimeContext`. It can load a validated coach, compile instructions,
 initialize session state, expose runtime context, and maintain conversation
-history through memory abstractions. It intentionally does not call an LLM.
+history through memory abstractions. Runtime context also exposes the selected
+execution strategy for inspection by future adapters. It intentionally does not
+call an LLM.
 
-### 5. Memory Layer
+### 6. Memory Layer
 
 The memory layer defines how coaches declare, read, write, and constrain memory.
 
@@ -134,7 +161,7 @@ The first memory implementation provides a `BaseMemory` interface,
 This keeps session memory testable and replaceable without introducing
 databases, vector stores, or provider-specific retrieval.
 
-### 6. Evaluation Layer
+### 7. Evaluation Layer
 
 The evaluation layer describes how coaching quality, safety, and adherence can be
 measured.
@@ -154,7 +181,7 @@ Likely future module:
 This can start as metadata in the schema and expand into a module once there is a
 clear need for executable evaluation.
 
-### 7. Interface and Tooling Layer
+### 8. Interface and Tooling Layer
 
 The interface layer exposes CoachSpec to developers.
 
@@ -173,7 +200,7 @@ Primary module:
 The CLI should be thin. It should call stable library APIs rather than contain
 business logic.
 
-### 8. Coach Catalog Layer
+### 9. Coach Catalog Layer
 
 The coach catalog contains example and reference coach specifications.
 
@@ -233,6 +260,45 @@ Should not own:
 - Provider SDK calls.
 - Database access.
 - CLI formatting.
+
+### `coachspec.composition`
+
+Owns declarative coach composition.
+
+Recommended responsibilities:
+
+- `CoachComposition` model.
+- `ExecutionStrategy` model.
+- `StrategyRegistry` lookup.
+- Static inference from validated spec fields until the schema grows explicit
+  composition fields.
+
+Should not own:
+
+- Model calls.
+- Message routing.
+- Async orchestration.
+- Workflow automation.
+- Tool execution.
+
+### `coachspec.modules`
+
+Owns reusable behavioral module definitions.
+
+Recommended responsibilities:
+
+- `BehavioralModule` data model.
+- `ModuleRegistry` lookup.
+- Built-in declarative module IDs and descriptions.
+- Documentation-friendly vocabulary for common coaching patterns.
+
+Should not own:
+
+- Runtime execution.
+- Agent routing.
+- Plugin loading.
+- YAML imports.
+- Provider SDK calls.
 
 ### `coachspec.runtime`
 
@@ -314,6 +380,9 @@ The key separations are:
   active status, and turn count.
 - Compiled instructions vs. execution context: compiled prompts are stable
   artifacts; `RuntimeContext` adds the active session id and memory snapshot.
+- Composition vs. orchestration: composition describes identity, pedagogy,
+  modules, and strategy; it does not create agents, route turns, or execute
+  workflows.
 - Coach behavior vs. model provider: a coach should not depend on OpenAI,
   Anthropic, local models, LangChain, or any other provider.
 - Memory policy vs. memory storage: the spec declares allowed memory behavior;
@@ -388,6 +457,28 @@ Likely contents:
 - memory policy
 - evaluation descriptors
 - source spec metadata
+
+### `CoachComposition`
+
+The declarative behavioral composition for a coach.
+
+Likely contents:
+
+- identity summary
+- pedagogy summary
+- behavioral module references
+- execution strategy
+
+### `ExecutionStrategy`
+
+A named conversational pattern that organizes how the coach moves through turns.
+
+Expected behavior:
+
+- Stay declarative.
+- Be visible in compiled instructions.
+- Be visible in runtime context.
+- Avoid becoming a workflow engine.
 
 ### `ModelAdapter`
 
@@ -522,6 +613,18 @@ Recommended boundary:
 - same spec plus same compiler version gives same compiled artifact.
 - compilation does not call models, load user memory, or inspect live sessions.
 
+### Keep Composition Declarative
+
+Composition should make common coaching structure explicit without creating
+runtime machinery too early.
+
+Recommended boundary:
+
+- behavioral modules name reusable coaching patterns.
+- execution strategies name conversation patterns.
+- runtime context may expose the selected strategy.
+- no multi-agent orchestration, task routing, or workflow automation is implied.
+
 ## Future Scaling Considerations
 
 Likely scaling pressure points:
@@ -539,7 +642,7 @@ Likely scaling pressure points:
 - Registries: teams may want shared coach catalogs, signed specs, or package
   metadata.
 - Composition: future coaches may import traits, pedagogical methods, or
-  constraint bundles.
+  constraint bundles through explicit declarative references.
 - Localization: identity, tone, pedagogy, and examples may need language-aware
   variants.
 - Security: untrusted specs should not execute arbitrary code.
@@ -564,6 +667,8 @@ Avoid building these too early:
 - Provider-specific first-class schema fields.
 - A custom DSL beyond YAML.
 - Multi-agent orchestration.
+- Planner/executor agents.
+- Workflow engines.
 - Advanced vector memory integrations.
 - Automatic pedagogy generation.
 - Fine-tuning workflows.
@@ -582,6 +687,8 @@ The current package layout is a good starting point:
 coachspec/
   schema/      public spec models, YAML loading, validation
   compiler/    spec-to-runtime compilation
+  composition/ declarative coach composition and execution strategies
+  modules/     reusable behavioral pattern definitions
   runtime/     sessions, adapters, event flow
   memory/      memory policies and store interfaces
   cli/         developer commands

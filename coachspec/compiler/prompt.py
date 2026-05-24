@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from coachspec.composition import CoachComposition
 from coachspec.schema import CoachSpec
 
 
@@ -11,8 +12,13 @@ class CompiledPrompt:
     text: str
 
 
-def compile_prompt(spec: CoachSpec) -> CompiledPrompt:
+def compile_prompt(
+    spec: CoachSpec,
+    composition: CoachComposition | None = None,
+) -> CompiledPrompt:
     """Compile a validated CoachSpec into deterministic coach instructions."""
+    composition = composition or CoachComposition.from_spec(spec)
+    composition.validate()
     sections = [
         _section(
             "Coach Identity",
@@ -53,6 +59,16 @@ def compile_prompt(spec: CoachSpec) -> CompiledPrompt:
                 ("Approach", spec.pedagogy.approach),
                 ("Methods", _bullet_list(spec.pedagogy.methods)),
                 ("Scaffolding", _bullet_list(spec.pedagogy.scaffolding)),
+            ],
+        ),
+        _section(
+            "Coach Composition",
+            [
+                ("Identity", composition.identity),
+                ("Pedagogy", composition.pedagogy),
+                ("Behavioral modules", _module_list(composition)),
+                ("Execution strategy", composition.execution_strategy.name),
+                ("Strategy summary", composition.execution_strategy.summary),
             ],
         ),
         _section(
@@ -113,6 +129,14 @@ def _inline_list(items: list[str]) -> str:
     if not items:
         return "None declared."
     return ", ".join(items)
+
+
+def _module_list(composition: CoachComposition) -> str:
+    if not composition.behavioral_modules:
+        return "None inferred."
+    return "\n".join(
+        f"- {module.id}: {module.description}" for module in composition.behavioral_modules
+    )
 
 
 def _yes_no(value: bool) -> str:
