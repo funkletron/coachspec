@@ -10,6 +10,7 @@ from coachspec.adapters.openai import OpenAIProviderConfigurationError
 from coachspec.composition import CoachComposition
 from coachspec.compiler import compile_prompt
 from coachspec.evaluation import evaluate_coachspec
+from coachspec.packaging import CoachPackageError, create_coach_package, inspect_coach_package
 from coachspec.persistence import JsonSessionStorage, SessionExporter, SessionPersistenceError
 from coachspec.runtime import CoachSession
 from coachspec.schema import validate_coachspec
@@ -340,6 +341,45 @@ def export_session(
     console.print(f"Transcript: {result.transcript_path}")
     console.print(f"Events: {result.events_path}")
     console.print(f"Metadata: {result.metadata_path}")
+
+
+@app.command("package")
+def package_coach(path: Path) -> None:
+    """Create a local portable CoachSpec package artifact."""
+    try:
+        result = create_coach_package(path)
+    except CoachPackageError as exc:
+        console.print(f"[red]Could not package CoachSpec:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[green]Created CoachSpec package:[/green] {result.path}")
+    console.print(f"Coach: {result.manifest['coach_name']} ({result.manifest['coach_id']})")
+    console.print(f"Package version: {result.manifest['package_version']}")
+    console.print("Contents:")
+    for name in sorted(result.checksums):
+        console.print(f"  - {name}")
+
+
+@app.command("inspect-package")
+def inspect_package(path: Path) -> None:
+    """Inspect a local CoachSpec package artifact."""
+    try:
+        inspection = inspect_coach_package(path)
+    except CoachPackageError as exc:
+        console.print(f"[red]Invalid CoachSpec package:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    manifest = inspection.manifest
+    console.print(f"[bold]CoachSpec Package[/bold]: {manifest.get('coach_name')} ({manifest.get('coach_id')})")
+    console.print(f"Spec version: {manifest.get('spec_version')}")
+    console.print(f"Package version: {manifest.get('package_version')}")
+    console.print(f"Created at: {manifest.get('created_at')}")
+    console.print(f"Source file: {manifest.get('source_file')}")
+    console.print(f"Supported runtime version: {_value(manifest.get('supported_runtime_version'))}")
+    console.print(f"Checksums valid: {_yes_no(inspection.valid_checksums)}")
+    console.print("Checksum references:")
+    for name in sorted(inspection.checksums):
+        console.print(f"  - {name}: {inspection.checksums[name]}")
 
 
 def main() -> None:
