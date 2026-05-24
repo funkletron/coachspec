@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
-from coachspec.adapters import MockProviderAdapter, ProviderRequest, ProviderResponse
+import pytest
+
+from coachspec.adapters import MockProviderAdapter, OpenAIProviderAdapter, ProviderRequest, ProviderResponse
+from coachspec.adapters.openai import OpenAIProviderConfigurationError
 from coachspec.runtime import CoachSession
 
 
@@ -53,3 +57,58 @@ def test_provider_request_construction() -> None:
     assert "# Coach Identity" in request.instructions
     assert request.execution_strategy.id == "socratic_loop"
     assert request.memory_snapshot.message_count == 1
+
+
+def test_openai_provider_maps_request_to_chat_completion() -> None:
+    session = CoachSession.from_file(EXAMPLE)
+    session.append_user_message("Help me study Psalm 23.")
+    request = session.build_provider_request("Help me study Psalm 23.")
+    client = FakeOpenAIClient("Look closely at the passage structure.")
+    adapter = OpenAIProviderAdapter(model="test-model", client=client)
+
+    response = adapter.generate(request)
+
+    assert response.content == "Look closely at the passage structure."
+    assert response.provider == "openai"
+    assert response.metadata["coach_id"] == "bible-deep-dive"
+    assert response.metadata["session_id"] == session.state.session_id
+    assert response.metadata["model"] == "test-model"
+    assert response.metadata["response_id"] == "response-123"
+    assert response.metadata["finish_reason"] == "stop"
+    assert client.request_kwargs["model"] == "test-model"
+    assert client.request_kwargs["messages"][0] == {
+        "role": "system",
+        "content": request.instructions,
+    }
+    assert client.request_kwargs["messages"][1] == {
+        "role": "user",
+        "content": "Help me study Psalm 23.",
+    }
+
+
+def test_openai_provider_requires_api_key_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(OpenAIProviderConfigurationError, match="OPENAI_API_KEY"):
+        OpenAIProviderAdapter()
+
+
+class FakeOpenAIClient:
+    def __init__(self, content: str) -> None:
+        self.request_kwargs: dict[str, object] = {}
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create),
+        )
+        self._content = content
+
+    def _create(self, **kwargs: object) -> object:
+        self.request_kwargs = kwargs
+        return SimpleNamespace(
+            id="response-123",
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=self._content),
+                    finish_reason="stop",
+                )
+            ],
+        )

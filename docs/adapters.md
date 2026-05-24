@@ -5,8 +5,9 @@ future LLM provider integration. They normalize runtime data into a
 provider-neutral request and normalize provider output back into an assistant
 message.
 
-This milestone is interface-first only. It does not add real provider SDKs, read
-API keys, make network calls, stream responses, or introduce async execution.
+Core CoachSpec remains provider-neutral. The default runtime path does not add
+real provider SDKs, read API keys, make network calls, stream responses, or
+introduce async execution.
 
 ## Interfaces
 
@@ -20,6 +21,9 @@ The adapter package lives in `coachspec.adapters`.
   provider integrations will implement later.
 - `MockProviderAdapter` is a deterministic local adapter for tests and CLI smoke
   runs.
+- `OpenAIProviderAdapter` is an optional prototype that lives behind the same
+  `BaseProviderAdapter` boundary. It is only configured when explicitly
+  requested.
 
 ## Runtime Integration
 
@@ -57,3 +61,35 @@ uv run python -m coachspec.cli run coaches/spirituality/bible_deep_dive.yaml --m
 The mock provider is intentionally deterministic. It is useful for validating
 request construction, session memory updates, and CLI wiring without coupling
 CoachSpec to OpenAI, Anthropic, local model servers, or hosted APIs.
+
+## Optional OpenAI Prototype
+
+The OpenAI adapter is optional and provider-specific code is isolated to
+`coachspec.adapters.openai`. It does not add OpenAI fields to CoachSpec YAML and
+does not change compiler semantics.
+
+Install the optional dependency before using the live adapter:
+
+```powershell
+uv sync --extra openai
+```
+
+Set the API key in the process environment:
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+```
+
+Then run with an explicit provider selection:
+
+```powershell
+uv run python -m coachspec.cli run coaches/spirituality/bible_deep_dive.yaml --provider openai
+```
+
+If the optional dependency is not installed or `OPENAI_API_KEY` is missing, the
+adapter fails before starting the session with a clear configuration message.
+The mock provider remains the safe default path for local smoke runs:
+
+```powershell
+uv run python -m coachspec.cli run coaches/spirituality/bible_deep_dive.yaml --mock-provider
+```
