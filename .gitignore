@@ -9,3 +9,4 @@ build/
 .vscode/
 sessions/
 exports/
+examples/web-demo/.local/
