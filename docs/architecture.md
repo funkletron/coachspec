@@ -83,7 +83,33 @@ The first compiler implementation emits a deterministic text instruction
 document from a validated `CoachSpec`. This is intentionally a plain prompt
 artifact, not runtime execution and not a provider integration.
 
-### 4. Runtime Layer
+### 4. Behavioral Module Layer
+
+The behavioral module layer defines reusable coaching behavior names and
+descriptions.
+
+Responsibilities:
+
+- Define common coaching patterns such as Socratic questioning, reflective
+  listening, deliberate practice, habit formation, and decision framing.
+- Provide stable IDs that coaches, docs, tests, and future schema versions can
+  reference.
+- Keep module definitions declarative and provider-neutral.
+- Avoid runtime composition, agent orchestration, plugin loading, or prompt
+  imports at this stage.
+
+Primary module:
+
+- `coachspec.modules`
+
+Behavioral modules are not separate agents. They are reusable behavior
+definitions that sit beside the schema as vocabulary for common coaching
+patterns. Today, coaches express these patterns through existing fields such as
+`pedagogy.methods`, `interaction.turn_guidelines`, `constraints.rules`, and
+`evaluation` metadata. A future schema version may add explicit module
+references once composition semantics are clear.
+
+### 5. Runtime Layer
 
 The runtime layer executes a compiled coach in a conversation.
 
@@ -109,7 +135,7 @@ and `RuntimeContext`. It can load a validated coach, compile instructions,
 initialize session state, expose runtime context, and maintain conversation
 history through memory abstractions. It intentionally does not call an LLM.
 
-### 5. Memory Layer
+### 6. Memory Layer
 
 The memory layer defines how coaches declare, read, write, and constrain memory.
 
@@ -134,7 +160,7 @@ The first memory implementation provides a `BaseMemory` interface,
 This keeps session memory testable and replaceable without introducing
 databases, vector stores, or provider-specific retrieval.
 
-### 6. Evaluation Layer
+### 7. Evaluation Layer
 
 The evaluation layer describes how coaching quality, safety, and adherence can be
 measured.
@@ -154,7 +180,7 @@ Likely future module:
 This can start as metadata in the schema and expand into a module once there is a
 clear need for executable evaluation.
 
-### 7. Interface and Tooling Layer
+### 8. Interface and Tooling Layer
 
 The interface layer exposes CoachSpec to developers.
 
@@ -173,7 +199,7 @@ Primary module:
 The CLI should be thin. It should call stable library APIs rather than contain
 business logic.
 
-### 8. Coach Catalog Layer
+### 9. Coach Catalog Layer
 
 The coach catalog contains example and reference coach specifications.
 
@@ -233,6 +259,25 @@ Should not own:
 - Provider SDK calls.
 - Database access.
 - CLI formatting.
+
+### `coachspec.modules`
+
+Owns reusable behavioral module definitions.
+
+Recommended responsibilities:
+
+- `BehavioralModule` data model.
+- `ModuleRegistry` lookup.
+- Built-in declarative module IDs and descriptions.
+- Documentation-friendly vocabulary for common coaching patterns.
+
+Should not own:
+
+- Runtime execution.
+- Agent routing.
+- Plugin loading.
+- YAML imports.
+- Provider SDK calls.
 
 ### `coachspec.runtime`
 
@@ -320,6 +365,8 @@ The key separations are:
   the host application supplies storage.
 - Pedagogy vs. prompting: pedagogy is a durable coaching method; prompts are a
   generated representation of that method.
+- Behavioral module vs. orchestration: modules are named behavior definitions;
+  they do not create agents, route turns, or execute independently.
 - Evaluation metadata vs. evaluator implementation: specs can declare what good
   behavior means before the project has a full evaluator engine.
 - CLI vs. library: the CLI exposes workflows; the library owns semantics.
@@ -582,6 +629,7 @@ The current package layout is a good starting point:
 coachspec/
   schema/      public spec models, YAML loading, validation
   compiler/    spec-to-runtime compilation
+  modules/     reusable behavioral pattern definitions
   runtime/     sessions, adapters, event flow
   memory/      memory policies and store interfaces
   cli/         developer commands

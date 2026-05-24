@@ -33,3 +33,17 @@ Compile an example:
 ```powershell
 uv run python -m coachspec.cli compile coaches/spirituality/bible_deep_dive.yaml
 ```
+
+## Behavioral Modules
+
+Behavioral modules are reusable coaching pattern definitions such as
+`socratic_questioning`, `reflective_listening`, `deliberate_practice`, and
+`accountability_checkin`.
+
+They are not separate agents, plugins, or runtime orchestration units. The
+initial registry in `coachspec.modules` gives CoachSpec a shared vocabulary for
+common behaviors while keeping the current schema, compiler, and runtime model
+unchanged.
+
+See `docs/behavioral_modules.md` for the current module boundary and future
+schema direction.
