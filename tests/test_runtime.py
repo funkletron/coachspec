@@ -101,3 +101,26 @@ def test_cli_run_can_use_mock_provider() -> None:
     assert result.exit_code == 0
     assert "Using local mock provider adapter." in result.stdout
     assert "Mock provider response for Bible Deep Dive Coach" in result.stdout
+
+
+def test_cli_inspect_outputs_structured_summary() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["inspect", str(EXAMPLE)])
+
+    assert result.exit_code == 0
+    assert "CoachSpec Inspect: Bible Deep Dive Coach (bible-deep-dive)" in result.stdout
+    assert "Identity" in result.stdout
+    assert "Role: Reflective Bible study coach" in result.stdout
+    assert "Purpose" in result.stdout
+    assert "Help users examine biblical passages" in result.stdout
+    assert "Pedagogy" in result.stdout
+    assert "Interaction" in result.stdout
+    assert "Memory" in result.stdout
+    assert "Mode: session" in result.stdout
+    assert "Constraints" in result.stdout
+    assert "Evaluation" in result.stdout
+    assert "Composition" in result.stdout
+    assert "Execution strategy: Socratic Loop" in result.stdout
+    assert "Behavioral modules:" in result.stdout
+    assert "socratic_questioning" in result.stdout
